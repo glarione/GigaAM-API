@@ -1,0 +1,63 @@
+services:
+  gigaam-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gigaam-server
+    ports:
+      - "8000:8000"
+    environment:
+      - GIGAAM_HOST=0.0.0.0
+      - GIGAAM_PORT=8000
+      - GIGAAM_DEFAULT_MODEL=v3_e2e_rnnt
+      - GIGAAM_DEVICE=${GIGAAM_DEVICE:-cuda}
+      - GIGAAM_FP16_ENCODER=true
+      - HF_TOKEN=${HF_TOKEN:-}
+      - GIGAAM_SEGMENTATION_MODEL=pyannote/segmentation-3.0
+    volumes:
+      - gigaam_cache:/root/.cache/gigaam
+    # GPU support (optional - remove if not using GPU)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - gigaam-network
+
+  # Optional: Prometheus for metrics collection
+  # Uncomment to enable
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: gigaam-prometheus
+  #   volumes:
+  #     - ./prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus_data:/prometheus
+  #   ports:
+  #     - "9090:9090"
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #   networks:
+  #     - gigaam-network
+  #   depends_on:
+  #     - gigaam-server
+
+volumes:
+  gigaam_cache:
+    driver: local
+  # prometheus_data:
+  #   driver: local
+
+networks:
+  gigaam-network:
+    driver: bridge

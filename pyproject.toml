@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "gigaam"
@@ -11,6 +11,18 @@ license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "GigaChat Team" },
+]
+keywords = ["speech-recognition", "asr", "audio", "conformer", "pyannote"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 dependencies = [
@@ -23,6 +35,9 @@ dependencies = [
     "torch>=2.5,<2.9",
     "torchaudio>=2.5,<2.9",
     "tqdm",
+    "loguru",
+    "huggingface_hub",
+    "pyannote-audio",
 ]
 
 [project.optional-dependencies]
@@ -33,16 +48,49 @@ longform = [
     "torchcodec==0.7",
     "numba>=0.62",
 ]
+server = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.6",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "websockets>=12.0",
+    "aiofiles>=23.2.1",
+    "prometheus-fastapi-instrumentator>=0.7.0",
+]
 tests = [
     "pytest",
     "pytest-cov",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.26.0",
     "scipy",
     "soundfile",
     "librosa",
 ]
+benchmarks = [
+    "pytest-benchmark>=4.0.0",
+]
+dev = [
+    "ruff>=0.1.0",
+    "mypy>=1.8.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/salute-developers/GigaAM/"
+Repository = "https://github.com/salute-developers/GigaAM/"
+Documentation = "https://github.com/salute-developers/GigaAM/docs"
 
-[tool.setuptools.packages.find]
-include = ["gigaam"]
+[tool.hatch.build.targets.wheel]
+packages = ["gigaam", "gigaam_server"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
