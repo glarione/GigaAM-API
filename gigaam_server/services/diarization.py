@@ -47,7 +47,6 @@ class DiarizationService:
             ):
                 self._pipeline = SpeakerDiarization(
                     embedding_batch_size = 8,
-                    segmentation_batch_size = 8,
                     token=os.getenv("HF_TOKEN"),
                 )
                 self._pipeline.instantiate({})
