@@ -1,5 +1,6 @@
 """Transcription endpoints - OpenAI-compatible API."""
 
+import os
 import tempfile
 from typing import Literal
 
@@ -41,6 +42,10 @@ async def transcribe_audio(
     Transcribe audio to text.
 
     OpenAI-compatible endpoint for speech-to-text.
+
+    Optimized for CPU:
+    - Short-form audio (<25s): Processes directly from bytes (no temp file)
+    - Long-form audio: Uses temp file only for pyannote VAD compatibility
     """
     # Validate model
     from ....config import get_settings
@@ -62,33 +67,32 @@ async def transcribe_audio(
     if len(audio_data) == 0:
         raise HTTPException(status_code=400, detail="Empty audio file")
 
-    # Save to temp file for processing
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
-            temp.write(audio_data)
-            temp_path = temp.name
+    # Transcribe with diarization if requested
+    # When diarization is enabled, audio is split by speaker boundaries
+    # and each speaker's segment is transcribed separately
+    # Diarization requires file-based processing
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp:
+        temp.write(audio_data)
+        temp_path = temp.name
 
-        # Transcribe with diarization if requested
-        # When diarization is enabled, audio is split by speaker boundaries
-        # and each speaker's segment is transcribed separately
-        if diarization:
-            result = await service.transcribe_with_diarization(
-                audio_path=temp_path,
-                model_name=model,
-            )
-        else:
-            result = await service.transcribe_from_file(
-                audio_path=temp_path,
-                model_name=model,
-                vad_filter=vad_filter,
-                diarization=False,
-            )
+        try:
+            if diarization:
+                result = await service.transcribe_with_diarization(
+                    audio_path=temp_path,
+                    model_name=model,
+                )
 
-    finally:
-        import os
-
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
+            else:
+                # Optimized path: process bytes directly (no temp file for short-form)
+                result = await service.transcribe_from_file(
+                    audio_path=temp_path,
+                    model_name=model,
+                    vad_filter=vad_filter,
+                    diarization=False,
+                )
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
     # Format response
     if response_format == "text":

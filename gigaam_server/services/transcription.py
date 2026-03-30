@@ -1,7 +1,6 @@
 """Transcription service wrapping GigaAM models."""
 
 import os
-import subprocess
 import tempfile
 import time
 import wave
@@ -12,11 +11,9 @@ import numpy as np
 import torch
 from loguru import logger
 
-from gigaam.model import GigaAMASR
-from gigaam.preprocess import SAMPLE_RATE, load_audio
-from gigaam.vad_utils import segment_audio_file
+from gigaam.preprocess import SAMPLE_RATE, load_audio, load_audio_bytes
 
-from ..schemas.transcription import TranscriptionResponse, TranscriptionSegment
+from ..schemas.transcription import TranscriptionSegment
 
 
 @dataclass
@@ -80,8 +77,8 @@ class TranscriptionService:
         Returns list of dicts with: start, end, speaker, audio_path
         Each segment contains audio for a single speaker.
         """
-        from .diarization import DiarizationService
         from ..config import get_settings
+        from .diarization import DiarizationService
 
         settings = get_settings()
         diarization_service = DiarizationService(settings)
@@ -178,6 +175,12 @@ class TranscriptionService:
                     full_text = text
 
             processing_time = time.perf_counter() - start_time
+            rtf = processing_time / audio_duration if audio_duration > 0 else 0
+
+            logger.info(
+                f"Transcription with diarization complete: "
+                f"{len(segments)} segments, RTF={rtf:.3f}x"
+            )
 
             return TranscriptionResult(
                 text=full_text,
@@ -191,6 +194,131 @@ class TranscriptionService:
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
 
+    async def transcribe_from_bytes(
+        self,
+        audio_data: bytes,
+        model_name: str,
+        vad_filter: bool = True,
+        diarization: bool = False,
+    ) -> TranscriptionResult:
+        """
+        Transcribe audio from raw bytes without temp file creation.
+
+        This is the optimized path for CPU - avoids subprocess and file I/O overhead.
+        Uses load_audio_bytes() for direct tensor conversion.
+
+        For long-form audio that needs pyannote VAD, a temp WAV file is still required
+        since pyannote pipeline reads from file path.
+        """
+        start_time = time.perf_counter()
+
+        # Calculate audio duration from raw data (int16 PCM)
+        audio_duration = len(audio_data) / (SAMPLE_RATE * 2)  # 2 bytes per sample
+
+        model = await self.model_manager.get_model(model_name)
+
+        # For short-form: process directly from bytes (no temp file)
+        if audio_duration <= 25 and not (vad_filter and audio_duration > 20):
+            logger.info(
+                f"Using short-form transcription for {audio_duration:.2f}s audio"
+            )
+
+            if len(audio_data) % 2 != 0:
+                audio_data = audio_data[:-1]
+            # Convert bytes to tensor directly
+            audio_tensor = load_audio_bytes(audio_data)
+
+            # Run inference directly on tensor
+            with torch.inference_mode():
+                wav = audio_tensor.to(model._device).to(model._dtype).unsqueeze(0)
+                length = torch.full([1], wav.shape[-1], device=model._device)
+                encoded, encoded_len = model.forward(wav, length)
+                text = model.decoding.decode(model.head, encoded, encoded_len)[0]
+
+            segments = [
+                TranscriptionSegment(
+                    id=0,
+                    start=0.0,
+                    end=audio_duration,
+                    text=text,
+                    tokens=[],
+                )
+            ]
+            full_text = text
+
+            processing_time = time.perf_counter() - start_time
+            rtf = processing_time / audio_duration if audio_duration > 0 else 0
+
+            logger.info(f"Transcription complete: RTF={rtf:.3f}x")
+
+            return TranscriptionResult(
+                text=full_text,
+                segments=segments,
+                duration=audio_duration,
+                model=model_name,
+                processing_time=processing_time,
+            )
+
+        # For long-form: still need temp file for pyannote VAD
+        logger.info(
+            f"Using long-form transcription for {audio_duration:.2f}s audio"
+        )
+
+        # Save to temp WAV for pyannote compatibility
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
+            wav_path = wav_file.name
+
+        try:
+            # Write raw PCM as WAV
+            # Ensure buffer size is a multiple of 2 bytes (int16)
+            if len(audio_data) % 2 != 0:
+                audio_data = audio_data[:-1]
+            audio_np = (
+                np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+            )
+            with wave.open(wav_path, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(SAMPLE_RATE)
+                wav.writeframes((audio_np * 32767).astype(np.int16).tobytes())
+
+            logger.info(f"Running VAD on {wav_path}")
+            utterances = model.transcribe_longform(wav_path)
+            logger.info(
+                f"Long-form returned {len(utterances)} segments from VAD"
+            )
+
+            # Handle empty utterances - VAD might have failed, use fallback
+            if not utterances:
+                logger.warning(
+                    "VAD returned no segments, falling back to empty result"
+                )
+                # Return empty result instead of crashing
+                utterances = [{"transcription": "", "boundaries": (0.0, audio_duration)}]
+
+            full_text, segments = self._audio_to_segments(
+                utterances, model_name, audio_duration
+            )
+
+            processing_time = time.perf_counter() - start_time
+            rtf = processing_time / audio_duration if audio_duration > 0 else 0
+
+            logger.info(
+                f"Transcription complete: {len(segments)} segments, "
+                f"RTF={rtf:.3f}x"
+            )
+
+            return TranscriptionResult(
+                text=full_text,
+                segments=segments,
+                duration=audio_duration,
+                model=model_name,
+                processing_time=processing_time,
+            )
+        finally:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
+
     async def transcribe(
         self,
         audio_data: bytes,
@@ -202,82 +330,11 @@ class TranscriptionService:
         Transcribe audio data.
 
         Auto-routes to short-form or long-form based on duration.
+        Deprecated: Use transcribe_from_bytes() for optimized path.
         """
-        import tempfile
-        import os
-        import subprocess
-
-        start_time = time.perf_counter()
-
-        # Calculate audio duration from raw data
-        audio_duration = len(audio_data) / (SAMPLE_RATE * 2)  # 2 bytes per sample
-
-        # Save raw audio to temp file, then convert with ffmpeg for pyannote compatibility
-        with tempfile.NamedTemporaryFile(suffix=".raw", delete=False) as raw_file:
-            raw_file.write(audio_data)
-            raw_path = raw_file.name
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
-            wav_path = wav_file.name
-
-        try:
-            # Convert raw PCM to WAV using ffmpeg for proper format
-            subprocess.run(
-                [
-                    "ffmpeg", "-y",
-                    "-f", "s16le",
-                    "-ac", "1",
-                    "-ar", str(SAMPLE_RATE),
-                    "-i", raw_path,
-                    "-acodec", "pcm_s16le",
-                    wav_path
-                ],
-                capture_output=True,
-                check=True
-            )
-
-            model = await self.model_manager.get_model(model_name)
-
-            if audio_duration > 25 or (vad_filter and audio_duration > 20):
-                # Use long-form transcription
-                logger.info(
-                    f"Using long-form transcription for {audio_duration:.2f}s audio"
-                )
-                utterances = model.transcribe_longform(wav_path)
-                full_text, segments = self._audio_to_segments(
-                    utterances, model_name, audio_duration
-                )
-            else:
-                # Use short-form transcription
-                logger.info(
-                    f"Using short-form transcription for {audio_duration:.2f}s audio"
-                )
-                text = model.transcribe(wav_path)
-                segments = [
-                    TranscriptionSegment(
-                        id=0,
-                        start=0.0,
-                        end=audio_duration,
-                        text=text,
-                        tokens=[],
-                    )
-                ]
-                full_text = text
-
-            processing_time = time.perf_counter() - start_time
-
-            return TranscriptionResult(
-                text=full_text,
-                segments=segments,
-                duration=audio_duration,
-                model=model_name,
-                processing_time=processing_time,
-            )
-        finally:
-            if os.path.exists(raw_path):
-                os.unlink(raw_path)
-            if os.path.exists(wav_path):
-                os.unlink(wav_path)
+        return await self.transcribe_from_bytes(
+            audio_data, model_name, vad_filter, diarization
+        )
 
     async def transcribe_from_file(
         self,
@@ -303,6 +360,12 @@ class TranscriptionService:
                 f"Using long-form transcription for {audio_duration:.2f}s audio"
             )
             utterances = model.transcribe_longform(audio_path)
+
+            # Handle empty utterances - create single empty segment
+            if not utterances:
+                logger.warning("Long-form returned empty, creating single segment")
+                utterances = [{"transcription": "", "boundaries": (0.0, audio_duration)}]
+
             full_text, segments = self._audio_to_segments(
                 utterances, model_name, audio_duration
             )
@@ -323,6 +386,9 @@ class TranscriptionService:
             full_text = text
 
         processing_time = time.perf_counter() - start_time
+        rtf = processing_time / audio_duration if audio_duration > 0 else 0
+
+        logger.info(f"Transcription complete: RTF={rtf:.3f}x")
 
         return TranscriptionResult(
             text=full_text,

@@ -54,7 +54,7 @@ def load_segmentation_model(model_id: str) -> Model:
             Resolution,
         ]
     ):
-        return Model.from_pretrained(local_path)
+        return Model.from_pretrained(local_path, token=os.getenv("HF_TOKEN"))
 
 
 def get_pipeline(
@@ -85,15 +85,24 @@ def segment_audio_file(
     strict_limit_duration: float = 30.0,
     new_chunk_threshold: float = 0.2,
     device: torch.device = torch.device("cpu"),
+    vad_threshold: float = 0.5,  # VAD detection threshold
 ) -> Tuple[List[torch.Tensor], List[Tuple[float, float]]]:
     """
     Segments an audio waveform into smaller chunks based on speech activity.
     The segmentation is performed using a PyAnnote voice activity detection pipeline.
     """
+    from loguru import logger
 
     audio = load_audio(wav_file)
     pipeline = get_pipeline(device)
+
+    # Run VAD - pyannote pipeline takes only audio path
+    # Note: pyannote VAD returns a Timeline with speech segments
     sad_segments = pipeline(wav_file)
+
+    # Debug: log VAD output
+    vad_timeline = list(sad_segments.get_timeline().support())
+    logger.info(f"VAD detected {len(vad_timeline)} speech segments")
 
     segments: List[torch.Tensor] = []
     curr_duration = 0.0

@@ -48,6 +48,10 @@ longform = [
     "torchcodec==0.7",
     "numba>=0.62",
 ]
+cpu-opt = [
+    # CPU optimization dependencies
+    "psutil>=5.9.0",  # For physical core detection in ONNX Runtime
+]
 server = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",

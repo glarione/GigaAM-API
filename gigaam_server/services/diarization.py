@@ -2,23 +2,22 @@
 
 import os
 import subprocess
-from typing import List
 
 import torch
+from loguru import logger
 from torch.torch_version import TorchVersion
+
+from gigaam.preprocess import SAMPLE_RATE
 
 # Add safe globals for PyTorch 2.6+ compatibility BEFORE pyannote imports
 torch.serialization.add_safe_globals([TorchVersion])
 
-import pyannote.audio
-from pyannote.audio.pipelines import SpeakerDiarization
 from pyannote.audio.core.task import Problem, Resolution, Specifications
+from pyannote.audio.pipelines import SpeakerDiarization
 
 # Add more safe globals after pyannote import
 torch.serialization.add_safe_globals([Problem, Resolution, Specifications])
 
-from loguru import logger
-from gigaam.preprocess import SAMPLE_RATE
 
 
 class DiarizationService:
@@ -41,15 +40,13 @@ class DiarizationService:
             return self._pipeline
 
         try:
-            # Set HF token if provided
-            if self.settings.hf_token:
-                os.environ["HF_TOKEN"] = self.settings.hf_token
-
             # Load diarization pipeline using safe loading
             # SpeakerDiarization combines VAD + speaker embedding + clustering
-            with torch.serialization.safe_globals([TorchVersion, Problem, Resolution, Specifications]):
+            with torch.serialization.safe_globals(
+                [TorchVersion, Problem, Resolution, Specifications]
+            ):
                 self._pipeline = SpeakerDiarization(
-                    segmentation=self.settings.segmentation_model,
+                    token=os.getenv("HF_TOKEN"),
                 )
                 self._pipeline.instantiate({})
             self._pipeline.to(self._device)
@@ -75,17 +72,23 @@ class DiarizationService:
             # Convert to proper format: 16kHz, mono, PCM
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", audio_path,
-                    "-ar", str(SAMPLE_RATE),
-                    "-ac", "1",
-                    "-acodec", "pcm_s16le",
-                    "-sample_fmt", "s16",
-                    prepared_path
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    audio_path,
+                    "-ar",
+                    str(SAMPLE_RATE),
+                    "-ac",
+                    "1",
+                    "-acodec",
+                    "pcm_s16le",
+                    "-sample_fmt",
+                    "s16",
+                    prepared_path,
                 ],
                 capture_output=True,
                 check=True,
-                timeout=60
+                timeout=60,
             )
             return prepared_path
         except Exception as e:
@@ -123,8 +126,8 @@ class DiarizationService:
     async def diarize(
         self,
         audio_path: str,
-        segments: List,
-    ) -> List:
+        segments: list,
+    ) -> list:
         """
         Assign speaker labels to transcription segments.
 

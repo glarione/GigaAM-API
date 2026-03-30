@@ -31,6 +31,8 @@ class ServerSettings(BaseSettings):
         "v3_e2e_rnnt",
     ]
     device: str = "cuda"  # cuda or cpu
+    # FP16 only provides benefit on GPU with Tensor Cores. On CPU it's actually slower.
+    # This will be auto-disabled when device="cpu" at runtime.
     fp16_encoder: bool = True
 
     # pyannote/HF settings
@@ -41,6 +43,11 @@ class ServerSettings(BaseSettings):
     max_audio_duration: float = 3600.0  # 1 hour max
     max_file_size: int = 500 * 1024 * 1024  # 500MB
     stream_buffer_size: int = 16000  # 1 second at 16kHz
+
+    # Batching settings
+    enable_batching: bool = True  # Enable dynamic request batching
+    batch_wait_ms: int = 25  # Wait time for batching (milliseconds)
+    max_batch_size: int = 8  # Maximum requests per batch
 
     # CORS settings
     cors_origins: List[str] = ["*"]

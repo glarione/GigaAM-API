@@ -1,14 +1,10 @@
+import os
 import warnings
 from typing import List, Optional, Tuple, Union
 
-import hydra
 import numpy as np
 import omegaconf
 import onnxruntime as rt
-import torch
-
-from .decoding import Tokenizer
-from .preprocess import FeatureExtractor, load_audio
 
 warnings.simplefilter("ignore", category=UserWarning)
 
@@ -17,92 +13,25 @@ DTYPE = np.float32
 MAX_LETTERS_PER_FRAME = 3
 
 
-def infer_onnx(
-    wav_file: str,
-    model_cfg: omegaconf.DictConfig,
-    sessions: List[rt.InferenceSession],
-    preprocessor: Optional[FeatureExtractor] = None,
-    tokenizer: Optional[Tokenizer] = None,
-) -> Union[str, np.ndarray]:
-    """Run ONNX sessions for the model, requires preprocessor instantiating"""
-    model_name = model_cfg.model_name
+def _get_optimal_thread_count() -> int:
+    """
+    Get optimal thread count for ONNX Runtime on CPU.
 
-    if preprocessor is None:
-        preprocessor = hydra.utils.instantiate(model_cfg.preprocessor)
-    if tokenizer is None and ("ctc" in model_name or "rnnt" in model_name):
-        tokenizer = hydra.utils.instantiate(model_cfg.decoding).tokenizer
+    Uses physical core count for better performance.
+    Falls back to 4 if unable to detect.
+    """
+    try:
+        import psutil
 
-    sgn = load_audio(wav_file)
-    input_signal = (
-        preprocessor(sgn.unsqueeze(0), torch.tensor([sgn.shape[-1]]))[0]
-        .detach()
-        .numpy()
-    )
-
-    enc_sess = sessions[0]
-    enc_inputs = {
-        node.name: data
-        for (node, data) in zip(
-            enc_sess.get_inputs(),
-            [input_signal.astype(DTYPE), [input_signal.shape[-1]]],
-        )
-    }
-    enc_features = enc_sess.run(
-        [node.name for node in enc_sess.get_outputs()], enc_inputs
-    )[0]
-
-    if "emo" in model_name or "ssl" in model_name:
-        return enc_features
-
-    blank_idx = len(tokenizer)
-    token_ids = []
-    prev_token = blank_idx
-    if "ctc" in model_name:
-        prev_tok = blank_idx
-        for tok in enc_features.argmax(-1).squeeze().tolist():
-            if (tok != prev_tok or prev_tok == blank_idx) and tok != blank_idx:
-                token_ids.append(tok)
-            prev_tok = tok
-    else:
-        pred_states = [
-            np.zeros(shape=(1, 1, model_cfg.head.decoder.pred_hidden), dtype=DTYPE),
-            np.zeros(shape=(1, 1, model_cfg.head.decoder.pred_hidden), dtype=DTYPE),
-        ]
-        pred_sess, joint_sess = sessions[1:]
-        for j in range(enc_features.shape[-1]):
-            emitted_letters = 0
-            while emitted_letters < MAX_LETTERS_PER_FRAME:
-                pred_inputs = {
-                    node.name: data
-                    for (node, data) in zip(
-                        pred_sess.get_inputs(), [np.array([[prev_token]])] + pred_states
-                    )
-                }
-                pred_outputs = pred_sess.run(
-                    [node.name for node in pred_sess.get_outputs()], pred_inputs
-                )
-
-                joint_inputs = {
-                    node.name: data
-                    for node, data in zip(
-                        joint_sess.get_inputs(),
-                        [enc_features[:, :, [j]], pred_outputs[0].swapaxes(1, 2)],
-                    )
-                }
-                log_probs = joint_sess.run(
-                    [node.name for node in joint_sess.get_outputs()], joint_inputs
-                )
-                token = log_probs[0].argmax(-1)[0][0]
-
-                if token != blank_idx:
-                    prev_token = token.item()
-                    pred_states = pred_outputs[1:]
-                    token_ids.append(token.item())
-                    emitted_letters += 1
-                else:
-                    break
-
-    return tokenizer.decode(token_ids)
+        # Use physical cores (not logical/hyperthreaded)
+        return psutil.cpu_count(logical=False) or 4
+    except ImportError:
+        # Fallback: try os.sched_getaffinity or default to 4
+        try:
+            return len(os.sched_getaffinity(0))
+        except AttributeError:
+            # Fallback to 4 threads
+            return 4
 
 
 def load_onnx(
@@ -112,16 +41,31 @@ def load_onnx(
 ) -> Tuple[
     List[rt.InferenceSession], Union[omegaconf.DictConfig, omegaconf.ListConfig]
 ]:
-    """Load ONNX sessions for the given versions and cpu / cuda provider"""
+    """Load ONNX sessions for the given versions and cpu / cuda provider
+
+    Optimized for CPU:
+    - Auto-detects physical core count for thread configuration
+    - Uses parallel execution mode for better throughput
+    - Enables CPU memory pattern optimization
+    """
+    # Auto-detect provider
     if provider is None and "CUDAExecutionProvider" in rt.get_available_providers():
         provider = "CUDAExecutionProvider"
     elif provider is None:
         provider = "CPUExecutionProvider"
 
+    # Get optimal thread count based on physical cores
+    num_cores = _get_optimal_thread_count()
+
+    # Configure session options for optimal CPU performance
     opts = rt.SessionOptions()
-    opts.intra_op_num_threads = 16
-    opts.execution_mode = rt.ExecutionMode.ORT_SEQUENTIAL
+    opts.intra_op_num_threads = num_cores
+    opts.inter_op_num_threads = max(1, num_cores // 4)  # Small inter-op parallelism
+    opts.execution_mode = (
+        rt.ExecutionMode.ORT_PARALLEL
+    )  # Parallel for better throughput
     opts.log_severity_level = 3
+    opts.enable_cpu_mem_pattern = True  # Memory pattern optimization
 
     model_cfg = omegaconf.OmegaConf.load(f"{onnx_dir}/{model_version}.yaml")
 

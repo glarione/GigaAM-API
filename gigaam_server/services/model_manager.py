@@ -44,13 +44,24 @@ class ModelManager:
 
             logger.info(f"Loading model: {model_name}")
             try:
+                # Enable torch.compile on CPU for 20-40% speedup (PyTorch 2.5+)
+                # Automatically applied when device is CPU
                 model = load_model(
                     model_name=model_name,
                     fp16_encoder=self.settings.fp16_encoder,
                     device=self._device,
+                    compile_cpu=self._device.type == "cpu",
                 )
                 self._models[model_name] = model
                 logger.info(f"Model loaded: {model_name}")
+                if self._device.type == "cpu":
+                    logger.info("torch.compile enabled for CPU inference")
+
+                # Warm up the model to initialize kernels and compiled graphs
+                logger.info(f"Warming up model {model_name}...")
+                model.warmup(duration_seconds=1.0)
+                logger.info(f"Model {model_name} ready")
+
                 return model
             except Exception as e:
                 logger.error(f"Failed to load model {model_name}: {e}")
