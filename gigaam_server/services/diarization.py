@@ -46,7 +46,6 @@ class DiarizationService:
                 [TorchVersion, Problem, Resolution, Specifications]
             ):
                 self._pipeline = SpeakerDiarization(
-                    embedding_batch_size = 8,
                     token=os.getenv("HF_TOKEN"),
                 )
                 self._pipeline.instantiate({})

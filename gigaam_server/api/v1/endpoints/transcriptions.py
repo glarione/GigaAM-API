@@ -22,7 +22,7 @@ async def get_transcription_service() -> TranscriptionService:
     from ....main import get_app
 
     app = get_app()
-    return TranscriptionService(app.state.model_manager)
+    return TranscriptionService(app.state.model_manager, app.state.diarization_service)
 
 
 @router.post("/transcriptions")

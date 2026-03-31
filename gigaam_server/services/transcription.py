@@ -37,8 +37,9 @@ class TranscriptionService:
     - GigaAMASR.transcribe_longform() for long-form with pyannote VAD
     """
 
-    def __init__(self, model_manager):
+    def __init__(self, model_manager, diarization_service=None):
         self.model_manager = model_manager
+        self.diarization_service = diarization_service
 
     def _audio_to_segments(
         self,
@@ -77,14 +78,12 @@ class TranscriptionService:
         Returns list of dicts with: start, end, speaker, audio_path
         Each segment contains audio for a single speaker.
         """
-        from ..config import get_settings
-        from .diarization import DiarizationService
+        if self.diarization_service is None:
+            logger.error("Diarization service not configured")
+            return []
 
-        settings = get_settings()
-        diarization_service = DiarizationService(settings)
-
-        # Get diarization output with speaker boundaries
-        diarization_output = await diarization_service._get_diarization_output(audio_path)
+        # Get diarization output with speaker boundaries using shared service
+        diarization_output = await self.diarization_service._get_diarization_output(audio_path)
 
         if diarization_output is None:
             return []
