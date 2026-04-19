@@ -1,0 +1,4 @@
+# Test tool dependencies
+gradio>=4.0.0
+sounddevice>=0.4.6
+websockets>=12.0

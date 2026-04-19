@@ -58,9 +58,8 @@ async def websocket_streaming(websocket: WebSocket):
     model_manager = app.state.model_manager
 
     # Get model name from query params or default
-    import urllib.parse
-
-    query_params = dict(urllib.parse.parse_qsl(websocket.query_params.decode()))
+    # websocket.query_params is already a QueryParams object, not a string
+    query_params = dict(websocket.query_params)
     model_name = query_params.get("model", "v3_ctc")
 
     # Check if diarization is enabled
