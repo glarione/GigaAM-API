@@ -202,13 +202,20 @@ class STTClient:
             return
 
         # Create message
+        base64_data = base64.b64encode(audio_bytes).decode("utf-8")
+        print(
+            f"DEBUG: Sending {len(audio_bytes)} bytes as {len(base64_data)} char base64 string"
+        )
         message = {
             "type": "audio",
-            "data": base64.b64encode(audio_bytes).decode("utf-8"),
+            "data": base64_data,
             "is_final": False,
         }
 
-        await self.websocket.send(json.dumps(message))
+        json_message = json.dumps(message)
+        print(f"DEBUG: JSON message length: {len(json_message)} chars")
+
+        await self.websocket.send(json_message)
 
     async def send_final(self):
         """Send end-of-stream signal."""

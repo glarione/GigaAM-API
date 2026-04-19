@@ -20,10 +20,13 @@ async def audio_stream_generator(
     while True:
         try:
             message = await websocket.receive_text()
+            message_json = json.loads(message)
+            msg_type = message_json.get("type")
+            data_length = len(message_json.get("data", ""))
             logger.debug(
-                f"WebSocket message received: type={json.loads(message).get('type')}"
+                f"WebSocket message received: type={msg_type}, data_length={data_length} chars"
             )
-            data = json.loads(message)
+            data = message_json
 
             if data.get("type") == "audio":
                 import base64
