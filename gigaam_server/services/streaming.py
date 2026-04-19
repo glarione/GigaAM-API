@@ -106,8 +106,8 @@ class StreamingService:
 
             async for chunk in audio_generator:
                 try:
-                    # Decode base64 audio
-                    audio_bytes = base64.b64decode(chunk)
+                    # Chunk is already decoded audio bytes from audio_stream_generator
+                    audio_bytes = chunk
 
                     # Debug: log chunk size
                     if len(audio_bytes) < 100:
