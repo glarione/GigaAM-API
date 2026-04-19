@@ -20,24 +20,34 @@ async def audio_stream_generator(
     while True:
         try:
             message = await websocket.receive_text()
+            logger.debug(
+                f"WebSocket message received: type={json.loads(message).get('type')}"
+            )
             data = json.loads(message)
 
             if data.get("type") == "audio":
                 import base64
 
                 audio_bytes = base64.b64decode(data["data"])
+                logger.debug(f"Audio chunk received: {len(audio_bytes)} bytes")
                 yield audio_bytes
 
                 if data.get("is_final"):
+                    logger.debug("Final audio chunk received, ending stream")
                     break
             elif data.get("type") == "close":
+                logger.debug("Close message received")
                 break
 
         except WebSocketDisconnect:
+            logger.warning("WebSocket client disconnected")
             break
         except json.JSONDecodeError:
             logger.warning("Invalid JSON received")
             continue
+        except Exception as e:
+            logger.error(f"Error in audio_stream_generator: {e}")
+            break
 
 
 @router.websocket("/ws")
@@ -50,16 +60,17 @@ async def websocket_streaming(websocket: WebSocket):
 
     Optional diarization: Add ?diarization=true to enable streaming speaker diarization.
     """
+    logger.debug(f"WebSocket connection attempt from {websocket.client}")
     await websocket.accept()
+    logger.info("WebSocket connection accepted")
 
     from ....main import get_app
 
     app = get_app()
     model_manager = app.state.model_manager
 
-    # Get model name from query params or default
-    # websocket.query_params is already a QueryParams object, not a string
     query_params = dict(websocket.query_params)
+    logger.debug(f"Query parameters received: {query_params}")
     model_name = query_params.get("model", "v3_ctc")
 
     # Check if diarization is enabled
@@ -93,7 +104,6 @@ async def websocket_streaming(websocket: WebSocket):
             try:
                 await websocket.send_json(message.model_dump())
             except RuntimeError:
-                # Connection already closed
                 connection_closed = True
                 break
 
@@ -105,7 +115,6 @@ async def websocket_streaming(websocket: WebSocket):
                     {"type": "error", "message": str(e), "is_final": True}
                 )
             except RuntimeError:
-                # Connection already closed, just log
                 logger.error("Could not send error message: connection closed")
 
     finally:
@@ -113,5 +122,4 @@ async def websocket_streaming(websocket: WebSocket):
             try:
                 await websocket.close()
             except RuntimeError:
-                # Already closed
                 pass

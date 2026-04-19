@@ -108,6 +108,11 @@ class StreamingService:
                 try:
                     # Decode base64 audio
                     audio_bytes = base64.b64decode(chunk)
+
+                    # Debug: log chunk size
+                    if len(audio_bytes) < 100:
+                        logger.debug(f"Small chunk received: {len(audio_bytes)} bytes")
+
                     audio_np = (
                         np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
                         / 32768.0
@@ -125,16 +130,17 @@ class StreamingService:
                             audio = audio[-(self._chunk_size + self._overlap_size) :]
 
                         # Transcribe
-                        audio_tensor = (
-                            torch.tensor(audio).unsqueeze(0).to(model._device)
-                        )
-                        length = torch.tensor([audio_tensor.shape[-1]]).to(
-                            model._device
-                        )
+                        with torch.no_grad():
+                            audio_tensor = (
+                                torch.tensor(audio).unsqueeze(0).to(model._device)
+                            )
+                            length = torch.tensor([audio_tensor.shape[-1]]).to(
+                                model._device
+                            )
 
-                        # Forward pass
-                        encoded, encoded_len = model.forward(audio_tensor, length)
-                        text = decoding.decode(model.head, encoded, encoded_len)[0]
+                            # Forward pass
+                            encoded, encoded_len = model.forward(audio_tensor, length)
+                            text = decoding.decode(model.head, encoded, encoded_len)[0]
 
                         # Get diarization result if enabled
                         diarization_result = None
