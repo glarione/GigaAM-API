@@ -74,13 +74,13 @@ async def websocket_streaming(websocket: WebSocket):
         if enable_diarization:
             from ....services.diarization_streaming import StreamingDiarizationService
 
-            diarization_service = StreamingDiarizationService(app.settings)
+            diarization_service = StreamingDiarizationService(app.state.settings)
             # Configure latency if specified
             if diarization_latency != 0.5:
                 diarization_service.configure(latency=diarization_latency)
 
         service = StreamingService(
-            model_manager, app.settings, diarization_service=diarization_service
+            model_manager, app.state.settings, diarization_service=diarization_service
         )
 
         async for message in service.stream_transcribe(
