@@ -66,6 +66,8 @@ async def websocket_streaming(websocket: WebSocket):
     enable_diarization = query_params.get("diarization", "false").lower() == "true"
     diarization_latency = float(query_params.get("diarization_latency", 0.5))
 
+    connection_closed = False
+
     try:
         from ....services.streaming import StreamingService
 
@@ -88,13 +90,28 @@ async def websocket_streaming(websocket: WebSocket):
             model_name,
             enable_diarization=enable_diarization,
         ):
-            await websocket.send_json(message.model_dump())
+            try:
+                await websocket.send_json(message.model_dump())
+            except RuntimeError:
+                # Connection already closed
+                connection_closed = True
+                break
 
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.send_json(
-            {"type": "error", "message": str(e), "is_final": True}
-        )
+        if not connection_closed:
+            logger.error(f"WebSocket error: {e}")
+            try:
+                await websocket.send_json(
+                    {"type": "error", "message": str(e), "is_final": True}
+                )
+            except RuntimeError:
+                # Connection already closed, just log
+                logger.error("Could not send error message: connection closed")
 
     finally:
-        await websocket.close()
+        if not connection_closed:
+            try:
+                await websocket.close()
+            except RuntimeError:
+                # Already closed
+                pass
