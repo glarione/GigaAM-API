@@ -1,6 +1,6 @@
 """Streaming message schemas."""
 
-from typing import Literal
+from typing import Literal, Optional, List, Dict
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +19,17 @@ class StreamingPartialMessage(BaseModel):
     type: Literal["partial"] = "partial"
     text: str = Field(..., description="Partial transcription text")
     is_final: bool = Field(default=False)
+
+    # Diarization fields (optional, only present when diarization is enabled)
+    speakers: Optional[List[str]] = Field(
+        default=None, description="Active speaker labels at this moment"
+    )
+    speaker_confidence: Optional[float] = Field(
+        default=None, description="Confidence score for speaker clustering (0.0-1.0)"
+    )
+    active_segments: Optional[List[Dict]] = Field(
+        default=None, description="Speaker segments with boundaries"
+    )
 
 
 class StreamingFinalMessage(BaseModel):

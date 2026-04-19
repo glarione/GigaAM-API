@@ -2,7 +2,7 @@
 
 import base64
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Optional
 
 import numpy as np
 import torch
@@ -51,9 +51,10 @@ class StreamingService:
     Provides partial results during processing.
     """
 
-    def __init__(self, model_manager, settings):
+    def __init__(self, model_manager, settings, diarization_service=None):
         self.model_manager = model_manager
         self.settings = settings
+        self.diarization_service = diarization_service
         self._chunk_size = 16000  # 1 second chunks
         self._overlap_size = 8000  # 0.5 second overlap for context
 
@@ -61,6 +62,7 @@ class StreamingService:
         self,
         audio_generator: AsyncGenerator[bytes, None],
         model_name: str,
+        enable_diarization: bool = False,
     ) -> AsyncGenerator[
         StreamingPartialMessage | StreamingFinalMessage | StreamingErrorMessage, None
     ]:
@@ -70,13 +72,27 @@ class StreamingService:
         Args:
             audio_generator: Async generator yielding base64-encoded audio chunks
             model_name: Model to use for transcription
+            enable_diarization: Enable streaming speaker diarization (requires DIART)
 
         Yields:
             Streaming messages with partial/final results
+            Includes speaker information if diarization is enabled
         """
         buffer = AudioBuffer()
         last_text = ""
         is_final = False
+
+        # Initialize diarization if enabled
+        diarization_gen = None
+        if enable_diarization and self.diarization_service:
+            try:
+                diarization_gen = self.diarization_service.stream_diarize(
+                    audio_generator
+                )
+                logger.info("Streaming diarization enabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize diarization: {e}")
+                diarization_gen = None
 
         try:
             model = await self.model_manager.get_model(model_name)
@@ -120,13 +136,35 @@ class StreamingService:
                         encoded, encoded_len = model.forward(audio_tensor, length)
                         text = decoding.decode(model.head, encoded, encoded_len)[0]
 
+                        # Get diarization result if enabled
+                        diarization_result = None
+                        if diarization_gen:
+                            try:
+                                diarization_result = await diarization_gen.__anext__()
+                            except StopAsyncIteration:
+                                diarization_gen = None
+
                         # Yield partial result if changed
                         if text and text != last_text:
                             last_text = text
-                            yield StreamingPartialMessage(
+                            partial_msg = StreamingPartialMessage(
                                 text=text,
                                 is_final=False,
                             )
+
+                            # Add diarization info if available
+                            if diarization_result:
+                                partial_msg.speakers = diarization_result.get(
+                                    "speakers"
+                                )
+                                partial_msg.speaker_confidence = diarization_result.get(
+                                    "confidence"
+                                )
+                                partial_msg.active_segments = diarization_result.get(
+                                    "segments"
+                                )
+
+                            yield partial_msg
 
                 except Exception as e:
                     logger.warning(f"Error processing chunk: {e}")
@@ -141,11 +179,34 @@ class StreamingService:
                 encoded, encoded_len = model.forward(audio_tensor, length)
                 final_text = decoding.decode(model.head, encoded, encoded_len)[0]
 
-                yield StreamingFinalMessage(
+                # Get final diarization result if enabled
+                diarization_result = None
+                if diarization_gen:
+                    try:
+                        # Try to get final diarization state
+                        diarization_result = await diarization_gen.__anext__()
+                    except StopAsyncIteration:
+                        pass
+
+                message = StreamingFinalMessage(
                     text=final_text or last_text,
                     segments=[],
                     is_final=True,
                 )
+
+                # Add diarization info if available
+                if diarization_result:
+                    # Convert segments to the expected format
+                    for seg in diarization_result.get("segments", []):
+                        message.segments.append(
+                            {
+                                "speaker": seg.get("speaker"),
+                                "start": seg.get("start"),
+                                "end": seg.get("end"),
+                            }
+                        )
+
+                yield message
 
         except Exception as e:
             logger.error(f"Streaming transcription error: {e}")
