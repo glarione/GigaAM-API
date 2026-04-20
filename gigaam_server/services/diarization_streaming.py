@@ -143,11 +143,13 @@ class StreamingDiarizationService:
                 if len(audio_bytes) == 0:
                     continue
 
-                # Convert int16 bytes to float32 waveform
+                # Convert int16 bytes to float32 waveform - ensure it's a real numpy array
                 audio_np = (
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
                     / 32768.0
                 )
+                # Force a copy to ensure it's not a memoryview
+                audio_np = audio_np.copy()
 
                 audio_buffer.append(audio_np)
                 timestamp += len(audio_np) / SAMPLE_RATE
@@ -155,15 +157,15 @@ class StreamingDiarizationService:
                 # Process when we have enough audio (DIART expects ~5s chunks)
                 total_samples = sum(len(chunk) for chunk in audio_buffer)
                 if total_samples >= diarization_chunk_size:
-                    # Concatenate buffered audio and ensure it's a proper numpy array
-                    audio = np.concatenate(audio_buffer).copy()
+                    # Concatenate buffered audio - all chunks are already real arrays
+                    audio = np.concatenate(audio_buffer)
 
                     # Trim to exact 5 seconds if needed
                     if len(audio) > diarization_chunk_size:
-                        audio = audio[:diarization_chunk_size].copy()
+                        audio = audio[:diarization_chunk_size]
 
-                    # Ensure audio is a proper numpy array (DIART expects np.ndarray)
-                    audio_input = audio.astype(np.float32)
+                    # Final conversion to ensure proper dtype and array type
+                    audio_input = np.ascontiguousarray(audio, dtype=np.float32)
 
                     # Run diarization inference
                     try:
