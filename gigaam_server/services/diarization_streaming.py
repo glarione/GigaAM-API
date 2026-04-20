@@ -81,8 +81,7 @@ class StreamingDiarizationService:
             )
 
             self._pipeline = SpeakerDiarization(config)
-            self._pipeline.to(self._device)
-
+            # DIART handles device placement internally, no need to call .to()
             logger.info(
                 f"DIART streaming diarization pipeline loaded "
                 f"(device={self._device}, latency={self._config['latency']}s)"
@@ -164,7 +163,8 @@ class StreamingDiarizationService:
                         audio = audio[:diarization_chunk_size]
 
                     # Convert to tensor for DIART
-                    audio_tensor = torch.tensor(audio).unsqueeze(0).to(self._device)
+                    # DIART handles device placement internally
+                    audio_tensor = torch.tensor(audio).unsqueeze(0)
 
                     # Run diarization inference
                     try:
