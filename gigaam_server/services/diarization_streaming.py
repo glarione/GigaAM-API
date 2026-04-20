@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from loguru import logger
 
+from diart import SpeakerDiarization, SpeakerDiarizationConfig
 from gigaam.preprocess import SAMPLE_RATE
 
 
@@ -55,7 +56,20 @@ class StreamingDiarizationService:
             return self._pipeline
 
         try:
+            import os
             from diart import SpeakerDiarization, SpeakerDiarizationConfig
+            from huggingface_hub import login
+
+            # Login to HuggingFace using HF_TOKEN environment variable (consistent with batch diarization)
+            hf_token = os.getenv("HF_TOKEN")
+            if hf_token:
+                login(token=hf_token)
+                logger.info("Logged in to HuggingFace using HF_TOKEN")
+            else:
+                logger.warning(
+                    "HF_TOKEN not found. DIART requires pyannote models which need authentication. "
+                    "Set HF_TOKEN environment variable or add to .env file."
+                )
 
             # Configure pipeline
             config = SpeakerDiarizationConfig(
@@ -80,6 +94,9 @@ class StreamingDiarizationService:
                 "DIART not installed. Install with: "
                 "pip install gigaam[streaming-diarization]"
             )
+            raise
+        except Exception as e:
+            logger.error(f"Failed to load DIART pipeline: {e}")
             raise
         except Exception as e:
             logger.error(f"Failed to load DIART pipeline: {e}")
