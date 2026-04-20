@@ -1204,6 +1204,7 @@ streaming-diarization = [
     { name = "diart" },
     { name = "rx" },
     { name = "sounddevice" },
+    { name = "soundfile" },
 ]
 tests = [
     { name = "httpx" },
@@ -1248,6 +1249,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'tests'" },
     { name = "sentencepiece" },
     { name = "sounddevice", marker = "extra == 'streaming-diarization'", specifier = ">=0.4.6" },
+    { name = "soundfile", marker = "extra == 'streaming-diarization'" },
     { name = "soundfile", marker = "extra == 'tests'" },
     { name = "torch", specifier = ">=2.5,<2.9" },
     { name = "torch", marker = "extra == 'longform'", specifier = "==2.8.*" },

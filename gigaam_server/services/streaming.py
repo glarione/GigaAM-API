@@ -109,10 +109,6 @@ class StreamingService:
                     # Chunk is already decoded audio bytes from audio_stream_generator
                     audio_bytes = chunk
 
-                    # Debug: log chunk size
-                    if len(audio_bytes) < 100:
-                        logger.debug(f"Small chunk received: {len(audio_bytes)} bytes")
-
                     audio_np = (
                         np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
                         / 32768.0

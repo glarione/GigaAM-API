@@ -1,5 +1,6 @@
 """Streaming endpoints for real-time transcription."""
 
+import base64
 import json
 from typing import AsyncGenerator
 
@@ -22,24 +23,16 @@ async def audio_stream_generator(
             message = await websocket.receive_text()
             message_json = json.loads(message)
             msg_type = message_json.get("type")
-            data_length = len(message_json.get("data", ""))
-            logger.debug(
-                f"WebSocket message received: type={msg_type}, data_length={data_length} chars"
-            )
-            data = message_json
 
-            if data.get("type") == "audio":
-                import base64
-
+            if msg_type == "audio":
+                data = message_json
                 audio_bytes = base64.b64decode(data["data"])
-                logger.debug(f"Audio chunk received: {len(audio_bytes)} bytes")
+
                 yield audio_bytes
 
                 if data.get("is_final"):
-                    logger.debug("Final audio chunk received, ending stream")
                     break
-            elif data.get("type") == "close":
-                logger.debug("Close message received")
+            elif msg_type == "close":
                 break
 
         except WebSocketDisconnect:

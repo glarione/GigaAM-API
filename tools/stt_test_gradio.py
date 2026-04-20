@@ -277,16 +277,16 @@ async def stream_audio_to_server(
         return
 
     duration = len(audio) / SAMPLE_RATE
-    yield f"Streaming {duration:.1f}s of audio...", ""
+    full_transcript = ""
+    yield f"Streaming {duration:.1f}s of audio...", full_transcript
 
     stt_client = STTClient(server_url, model, enable_diarization)
 
     if not await stt_client.connect():
-        yield f"Error: Failed to connect to {server_url}", ""
+        yield f"Error: Failed to connect to {server_url}", full_transcript
         return
 
-    full_transcript = ""
-    last_speakers = []
+    last_speakers: list = []
     last_confidence = 0.0
 
     try:
@@ -341,7 +341,7 @@ async def stream_audio_to_server(
         # Send final signal
         await stt_client.send_final()
 
-        # Receive results
+        # Receive results and append to transcript
         async for result in stt_client.receive_results():
             text = result.get("text", "")
             is_final = result.get("is_final", False)
@@ -358,8 +358,12 @@ async def stream_audio_to_server(
                 speaker_info = format_speakers(speakers, confidence)
                 display_text = f"{speaker_info} {text}"
 
+            # Append to transcript instead of replacing
             if text:
-                full_transcript = text
+                if full_transcript:
+                    full_transcript += " " + text
+                else:
+                    full_transcript = text
 
             status = f"Status: Streaming... | {display_text}"
             yield status, full_transcript

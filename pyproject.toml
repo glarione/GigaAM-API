@@ -52,6 +52,7 @@ streaming-diarization = [
     "diart @ git+https://github.com/glarione/diart.git",
     "sounddevice>=0.4.6",
     "rx>=3.2.0",
+    "soundfile",
 ]
 cpu-opt = [
     # CPU optimization dependencies

@@ -102,15 +102,31 @@ class StreamingDiarizationService:
                 - segments: List of speaker segments with boundaries
                 - confidence: Clustering confidence score
         """
-        pipeline = await self.get_pipeline()
+        try:
+            pipeline = await self.get_pipeline()
+        except Exception as e:
+            logger.error(f"Failed to initialize diarization: {e}")
+            # Yield empty results for all chunks if diarization fails
+            async for _ in audio_generator:
+                yield {
+                    "timestamp": 0.0,
+                    "speakers": [],
+                    "segments": [],
+                    "confidence": 0.0,
+                }
+            return
 
         # Buffer for accumulating audio chunks
         audio_buffer = []
         timestamp = 0.0
-        chunk_duration = 1.0  # 1 second chunks (matching streaming service)
+        chunk_size = 16000  # 1 second at 16kHz
+        diarization_chunk_size = 80000  # 5 seconds for DIART
 
         try:
             async for audio_bytes in audio_generator:
+                if len(audio_bytes) == 0:
+                    continue
+
                 # Convert int16 bytes to float32 waveform
                 audio_np = (
                     np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
@@ -118,18 +134,22 @@ class StreamingDiarizationService:
                 )
 
                 audio_buffer.append(audio_np)
-                timestamp += chunk_duration
+                timestamp += len(audio_np) / SAMPLE_RATE
 
                 # Process when we have enough audio (DIART expects ~5s chunks)
-                if len(audio_buffer) >= 5:
+                total_samples = sum(len(chunk) for chunk in audio_buffer)
+                if total_samples >= diarization_chunk_size:
                     # Concatenate buffered audio
                     audio = np.concatenate(audio_buffer)
+
+                    # Trim to exact 5 seconds if needed
+                    if len(audio) > diarization_chunk_size:
+                        audio = audio[:diarization_chunk_size]
 
                     # Convert to tensor for DIART
                     audio_tensor = torch.tensor(audio).unsqueeze(0).to(self._device)
 
                     # Run diarization inference
-                    # DIART returns annotation with speaker segments
                     try:
                         result = pipeline(audio_tensor)
 
@@ -176,9 +196,23 @@ class StreamingDiarizationService:
                             "confidence": 0.0,
                         }
 
-                    # Clear buffer (keep last 1s for continuity)
-                    if len(audio_buffer) > 1:
-                        audio_buffer = audio_buffer[-1:]
+                    # Keep last 1 second for continuity
+                    remaining_samples = max(
+                        0, total_samples - diarization_chunk_size + 16000
+                    )
+                    if remaining_samples > 0 and len(audio_buffer) > 0:
+                        # Rebuild buffer with remaining audio
+                        new_buffer: List[np.ndarray] = []
+                        samples_left = remaining_samples
+                        for chunk in reversed(audio_buffer):
+                            if samples_left <= 0:
+                                break
+                            take = min(len(chunk), samples_left)
+                            new_buffer.insert(0, chunk[-take:])
+                            samples_left -= take
+                        audio_buffer = new_buffer
+                    else:
+                        audio_buffer = []
 
         except Exception as e:
             logger.error(f"Streaming diarization error: {e}")
