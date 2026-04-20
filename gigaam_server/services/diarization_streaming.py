@@ -155,15 +155,15 @@ class StreamingDiarizationService:
                 # Process when we have enough audio (DIART expects ~5s chunks)
                 total_samples = sum(len(chunk) for chunk in audio_buffer)
                 if total_samples >= diarization_chunk_size:
-                    # Concatenate buffered audio
-                    audio = np.concatenate(audio_buffer)
+                    # Concatenate buffered audio and ensure it's a proper numpy array
+                    audio = np.concatenate(audio_buffer).copy()
 
                     # Trim to exact 5 seconds if needed
                     if len(audio) > diarization_chunk_size:
-                        audio = audio[:diarization_chunk_size]
+                        audio = audio[:diarization_chunk_size].copy()
 
                     # Ensure audio is a proper numpy array (DIART expects np.ndarray)
-                    audio_input = np.asarray(audio, dtype=np.float32)
+                    audio_input = audio.astype(np.float32)
 
                     # Run diarization inference
                     try:
