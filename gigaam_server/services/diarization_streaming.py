@@ -162,13 +162,13 @@ class StreamingDiarizationService:
                     if len(audio) > diarization_chunk_size:
                         audio = audio[:diarization_chunk_size]
 
-                    # Convert to tensor for DIART
+                    # Convert to numpy array for DIART (expects numpy, not tensor)
                     # DIART handles device placement internally
-                    audio_tensor = torch.tensor(audio).unsqueeze(0)
+                    audio_input = audio
 
                     # Run diarization inference
                     try:
-                        result = pipeline(audio_tensor)
+                        result = pipeline(audio_input)
 
                         # Extract active speakers at current timestamp
                         speakers = []
