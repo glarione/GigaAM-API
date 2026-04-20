@@ -162,9 +162,8 @@ class StreamingDiarizationService:
                     if len(audio) > diarization_chunk_size:
                         audio = audio[:diarization_chunk_size]
 
-                    # Convert to numpy array for DIART (expects numpy, not tensor)
-                    # DIART handles device placement internally
-                    audio_input = audio
+                    # Ensure audio is a proper numpy array (DIART expects np.ndarray)
+                    audio_input = np.asarray(audio, dtype=np.float32)
 
                     # Run diarization inference
                     try:
