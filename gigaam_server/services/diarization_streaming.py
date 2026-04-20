@@ -167,6 +167,14 @@ class StreamingDiarizationService:
                     # Final conversion to ensure proper dtype and array type
                     audio_input = np.ascontiguousarray(audio, dtype=np.float32)
 
+                    # Debug: log audio input type and shape
+                    logger.debug(
+                        f"Diarization input: type={type(audio_input)}, "
+                        f"shape={audio_input.shape}, "
+                        f"dtype={audio_input.dtype}, "
+                        f"flags={audio_input.flags if hasattr(audio_input, 'flags') else 'N/A'}"
+                    )
+
                     # Run diarization inference
                     try:
                         result = pipeline(audio_input)
