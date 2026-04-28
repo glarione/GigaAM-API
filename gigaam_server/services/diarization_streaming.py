@@ -6,6 +6,7 @@ import os
 import numpy as np
 import torch
 from diart import SpeakerDiarization, SpeakerDiarizationConfig
+from diart.io import SlidingWindowFeature, SlidingWindow
 from huggingface_hub import login
 from loguru import logger
 
@@ -59,7 +60,6 @@ class StreamingDiarizationService:
             return self._pipeline
 
         try:
-
             # Login to HuggingFace using HF_TOKEN environment variable (consistent with batch diarization)
             hf_token = os.getenv("HF_TOKEN")
             if hf_token:
@@ -175,8 +175,30 @@ class StreamingDiarizationService:
                         f"flags={audio_input.flags if hasattr(audio_input, 'flags') else 'N/A'}"
                     )
 
-                    # Run diarization inference
-                    result = pipeline(audio_input)
+                    # Wrap audio in SlidingWindowFeature (DIART expects this format)
+                    # Create a sliding window with proper timing
+                    window = SlidingWindow(
+                        start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
+                        duration=diarization_chunk_size / SAMPLE_RATE,
+                        step=diarization_chunk_size / SAMPLE_RATE,
+                    )
+                    waveform = SlidingWindowFeature(audio_input.reshape(1, -1), window)
+
+                    # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
+                    result = pipeline([waveform])
+
+                    # Extract result from the list (we only sent one chunk)
+                    if isinstance(result, list) and len(result) > 0:
+                        result = result[
+                            0
+                        ][
+                            0
+                        ]  # Get Annotation from (Annotation, SlidingWindowFeature) tuple
+                    else:
+                        result = None
+
+                    if result is None:
+                        raise ValueError("Diarization returned no result")
 
                     try:
                         # Extract active speakers at current timestamp
