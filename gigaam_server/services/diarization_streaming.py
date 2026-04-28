@@ -177,15 +177,20 @@ class StreamingDiarizationService:
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
                     # Create a sliding window with proper timing
-                    # SlidingWindowFeature expects 2D data: (num_channels, num_samples)
+                    # SlidingWindowFeature expects 1D data for mono audio
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
                         duration=diarization_chunk_size / SAMPLE_RATE,
                         step=diarization_chunk_size / SAMPLE_RATE,
                     )
-                    # Reshape to (1, samples) for mono audio
-                    audio_2d = audio_input.reshape(1, -1)
-                    waveform = SlidingWindowFeature(audio_2d, window)
+                    # Keep audio as 1D array for mono
+                    waveform = SlidingWindowFeature(audio_input, window)
+
+                    # Debug: check waveform data shape
+                    logger.debug(
+                        f"Waveform data: type={type(waveform.data)}, "
+                        f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}"
+                    )
 
                     # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
                     result = pipeline([waveform])
