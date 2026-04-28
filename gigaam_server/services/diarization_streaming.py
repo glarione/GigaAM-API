@@ -177,15 +177,14 @@ class StreamingDiarizationService:
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
                     # Create a sliding window with proper timing
-                    # SlidingWindowFeature needs 2D data: (features, samples) for mono = (1, samples)
+                    # SlidingWindowFeature needs 1D data: (samples,) for mono audio
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
                         duration=diarization_chunk_size / SAMPLE_RATE,
                         step=diarization_chunk_size / SAMPLE_RATE,
                     )
-                    # Reshape to (1, samples) for mono audio with 1 feature channel
-                    audio_2d = audio_input.reshape(1, -1)
-                    waveform = SlidingWindowFeature(audio_2d, window)
+                    # Keep audio as 1D array for mono - DIART's torch.stack expects this
+                    waveform = SlidingWindowFeature(audio_input, window)
 
                     # Debug: check waveform data shape
                     logger.debug(
