@@ -199,6 +199,8 @@ class StreamingDiarizationService:
                     # Try calling pipeline and catch the actual error with more context
                     try:
                         # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
+                        import traceback
+
                         result = pipeline([waveform])
 
                         # Extract result from the list (we only sent one chunk)
@@ -220,6 +222,7 @@ class StreamingDiarizationService:
                     except Exception as e:
                         logger.error(f"Pipeline call failed: {e}")
                         logger.error(f"Waveform shape: {waveform.data.shape}")
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                         raise
 
                     if result is None:
