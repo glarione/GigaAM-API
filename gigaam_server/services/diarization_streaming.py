@@ -1,11 +1,14 @@
 """Streaming speaker diarization using DIART."""
 
-from typing import AsyncGenerator, Dict, Any, Optional, List
-import torch
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+import os
 import numpy as np
+import torch
+from diart import SpeakerDiarization, SpeakerDiarizationConfig
+from huggingface_hub import login
 from loguru import logger
 
-from diart import SpeakerDiarization, SpeakerDiarizationConfig
 from gigaam.preprocess import SAMPLE_RATE
 
 
@@ -56,9 +59,6 @@ class StreamingDiarizationService:
             return self._pipeline
 
         try:
-            import os
-            from diart import SpeakerDiarization, SpeakerDiarizationConfig
-            from huggingface_hub import login
 
             # Login to HuggingFace using HF_TOKEN environment variable (consistent with batch diarization)
             hf_token = os.getenv("HF_TOKEN")
@@ -176,9 +176,9 @@ class StreamingDiarizationService:
                     )
 
                     # Run diarization inference
-                    try:
                         result = pipeline(audio_input)
 
+                    try:
                         # Extract active speakers at current timestamp
                         speakers = []
                         segments = []
