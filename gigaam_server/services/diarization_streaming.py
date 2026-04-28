@@ -177,14 +177,19 @@ class StreamingDiarizationService:
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
                     # Create a sliding window with proper timing
-                    # SlidingWindowFeature needs 1D data: (samples,) for mono audio
+                    # Based on error analysis:
+                    # - torch.stack of 1D (80000,) creates (batch, 80000) -> segmentation expects (batch, features, samples)
+                    # - torch.stack of 2D (1, 80000) creates (batch, 1, 80000) -> but pipeline checks batch.shape[1] == 80000
+                    # This suggests the pipeline's assertion might be wrong for 2D input
+                    # Let's try 2D and see if the assertion is the issue
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
                         duration=diarization_chunk_size / SAMPLE_RATE,
                         step=diarization_chunk_size / SAMPLE_RATE,
                     )
-                    # Keep audio as 1D array for mono - DIART's torch.stack expects this
-                    waveform = SlidingWindowFeature(audio_input, window)
+                    # Try 2D format: (features=1, samples)
+                    audio_2d = audio_input.reshape(1, -1)
+                    waveform = SlidingWindowFeature(audio_2d, window)
 
                     # Debug: check waveform data shape
                     logger.debug(
@@ -192,18 +197,31 @@ class StreamingDiarizationService:
                         f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}"
                     )
 
-                    # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
-                    result = pipeline([waveform])
+                    # Try calling pipeline and catch the actual error with more context
+                    try:
+                        # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
+                        result = pipeline([waveform])
 
-                    # Extract result from the list (we only sent one chunk)
-                    if isinstance(result, list) and len(result) > 0:
-                        result = result[
-                            0
-                        ][
-                            0
-                        ]  # Get Annotation from (Annotation, SlidingWindowFeature) tuple
-                    else:
-                        result = None
+                        # Extract result from the list (we only sent one chunk)
+                        if isinstance(result, list) and len(result) > 0:
+                            result = result[
+                                0
+                            ][
+                                0
+                            ]  # Get Annotation from (Annotation, SlidingWindowFeature) tuple
+                        else:
+                            result = None
+                    except AssertionError as e:
+                        # Pipeline assertion failed - might be a bug in DIART's assertion for 2D input
+                        logger.error(f"Pipeline assertion failed: {e}")
+                        logger.error(
+                            "This might be a DIART bug with 2D input. The models expect (batch, features, samples)"
+                        )
+                        raise
+                    except Exception as e:
+                        logger.error(f"Pipeline call failed: {e}")
+                        logger.error(f"Waveform shape: {waveform.data.shape}")
+                        raise
 
                     if result is None:
                         raise ValueError("Diarization returned no result")
