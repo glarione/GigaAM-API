@@ -222,13 +222,23 @@ class StreamingDiarizationService:
                         f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}, "
                         f"min={audio_2d.min():.4f}, max={audio_2d.max():.4f}, mean={audio_2d.mean():.4f}"
                     )
+                    logger.debug(
+                        f"DIART config sample_rate: {pipeline.config.sample_rate}"
+                    )
+                    logger.debug(
+                        f"Expected duration: {pipeline.config.duration}s, samples: {int(pipeline.config.duration * pipeline.config.sample_rate)}"
+                    )
 
                     # Try calling pipeline and catch the actual error with more context
                     try:
                         # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
                         import traceback
 
+                        logger.debug("Calling DIART pipeline...")
                         result = pipeline([waveform])
+                        logger.debug(
+                            f"Pipeline returned: {type(result)}, length: {len(result) if hasattr(result, '__len__') else 'N/A'}"
+                        )
 
                         # Extract result from the list (we only sent one chunk)
                         if isinstance(result, list) and len(result) > 0:
