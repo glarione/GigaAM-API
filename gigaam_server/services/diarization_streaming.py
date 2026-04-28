@@ -235,10 +235,30 @@ class StreamingDiarizationService:
                         import traceback
 
                         logger.debug("Calling DIART pipeline...")
-                        result = pipeline([waveform])
-                        logger.debug(
-                            f"Pipeline returned: {type(result)}, length: {len(result) if hasattr(result, '__len__') else 'N/A'}"
+
+                        # Debug: check if segmentation produces output
+                        logger.debug(f"Calling segmentation model directly...")
+                        batch = torch.stack(
+                            [torch.from_numpy(w.data) for w in [waveform]]
                         )
+                        logger.debug(f"Batch shape: {batch.shape}")
+
+                        seg_output = pipeline.segmentation(batch)
+                        logger.debug(
+                            f"Segmentation output shape: {seg_output.shape if hasattr(seg_output, 'shape') else type(seg_output)}"
+                        )
+
+                        # If segmentation produces output, continue with pipeline
+                        if seg_output.shape[0] > 0 and seg_output.shape[-1] > 0:
+                            result = pipeline([waveform])
+                            logger.debug(
+                                f"Pipeline returned: {type(result)}, length: {len(result) if hasattr(result, '__len__') else 'N/A'}"
+                            )
+                        else:
+                            logger.warning(
+                                "Segmentation produced no output - no speech detected in chunk"
+                            )
+                            result = None
 
                         # Extract result from the list (we only sent one chunk)
                         if isinstance(result, list) and len(result) > 0:
@@ -263,7 +283,31 @@ class StreamingDiarizationService:
                         raise
 
                     if result is None:
-                        raise ValueError("Diarization returned no result")
+                        # No speech detected or segmentation failed - yield empty result
+                        logger.debug("No diarization result - yielding empty speakers")
+                        yield {
+                            "timestamp": timestamp,
+                            "speakers": [],
+                            "segments": [],
+                            "confidence": 0.0,
+                        }
+                        # Still need to update buffer
+                        remaining_samples = max(
+                            0, total_samples - diarization_chunk_size + 16000
+                        )
+                        if remaining_samples > 0 and len(audio_buffer) > 0:
+                            temp_buffer: List[np.ndarray] = []
+                            samples_left = remaining_samples
+                            for chunk in reversed(audio_buffer):
+                                if samples_left <= 0:
+                                    break
+                                take = min(len(chunk), samples_left)
+                                temp_buffer.insert(0, chunk[-take:])
+                                samples_left -= take
+                            audio_buffer = temp_buffer
+                        else:
+                            audio_buffer = []
+                        continue
 
                     try:
                         # Extract active speakers at current timestamp
