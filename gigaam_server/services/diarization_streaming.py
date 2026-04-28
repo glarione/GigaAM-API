@@ -6,7 +6,7 @@ import os
 import numpy as np
 import torch
 from diart import SpeakerDiarization, SpeakerDiarizationConfig
-from diart.io import SlidingWindowFeature, SlidingWindow
+from pyannote.core import SlidingWindowFeature, SlidingWindow
 from huggingface_hub import login
 from loguru import logger
 
