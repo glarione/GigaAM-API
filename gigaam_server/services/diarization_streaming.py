@@ -176,7 +176,7 @@ class StreamingDiarizationService:
                     )
 
                     # Run diarization inference
-                        result = pipeline(audio_input)
+                    result = pipeline(audio_input)
 
                     try:
                         # Extract active speakers at current timestamp
