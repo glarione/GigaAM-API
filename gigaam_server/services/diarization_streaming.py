@@ -193,7 +193,8 @@ class StreamingDiarizationService:
                     # Debug: check waveform data shape
                     logger.debug(
                         f"Waveform data: type={type(waveform.data)}, "
-                        f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}"
+                        f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}, "
+                        f"min={audio_2d.min():.4f}, max={audio_2d.max():.4f}, mean={audio_2d.mean():.4f}"
                     )
 
                     # Try calling pipeline and catch the actual error with more context
