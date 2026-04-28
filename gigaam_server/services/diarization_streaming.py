@@ -177,18 +177,17 @@ class StreamingDiarizationService:
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
                     # Create a sliding window with proper timing
-                    # Based on error analysis:
-                    # - torch.stack of 1D (80000,) creates (batch, 80000) -> segmentation expects (batch, features, samples)
-                    # - torch.stack of 2D (1, 80000) creates (batch, 1, 80000) -> but pipeline checks batch.shape[1] == 80000
-                    # This suggests the pipeline's assertion might be wrong for 2D input
-                    # Let's try 2D and see if the assertion is the issue
+                    # Based on DIART source code analysis:
+                    # - segmentation() expects (samples, channels) or (batch, samples, channels)
+                    # - torch.stack of (samples, channels) creates (batch, samples, channels)
+                    # - Then assertion checks batch.shape[1] == samples (correct!)
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
                         duration=diarization_chunk_size / SAMPLE_RATE,
                         step=diarization_chunk_size / SAMPLE_RATE,
                     )
-                    # Try 2D format: (features=1, samples)
-                    audio_2d = audio_input.reshape(1, -1)
+                    # Reshape to (samples, channels) = (80000, 1) for mono audio
+                    audio_2d = audio_input.reshape(-1, 1)  # (80000,) -> (80000, 1)
                     waveform = SlidingWindowFeature(audio_2d, window)
 
                     # Debug: check waveform data shape
