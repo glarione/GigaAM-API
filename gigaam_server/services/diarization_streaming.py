@@ -167,13 +167,39 @@ class StreamingDiarizationService:
                     # Final conversion to ensure proper dtype and array type
                     audio_input = np.ascontiguousarray(audio, dtype=np.float32)
 
-                    # Debug: log audio input type and shape
-                    logger.debug(
-                        f"Diarization input: type={type(audio_input)}, "
-                        f"shape={audio_input.shape}, "
-                        f"dtype={audio_input.dtype}, "
-                        f"flags={audio_input.flags if hasattr(audio_input, 'flags') else 'N/A'}"
-                    )
+                    # Normalize audio to have better amplitude for segmentation model
+                    # DIART's segmentation model might need higher amplitude to detect speech
+                    audio_max = np.abs(audio_input).max()
+                    if audio_max > 0:
+                        # Normalize to [-1, 1] range with some headroom
+                        audio_input = audio_input / audio_max * 0.9
+                    else:
+                        # Silent audio - skip diarization but still update buffer
+                        logger.warning("Silent audio detected, skipping diarization")
+                        yield {
+                            "timestamp": timestamp,
+                            "speakers": [],
+                            "segments": [],
+                            "confidence": 0.0,
+                        }
+                        # Still need to update buffer for next iteration
+                        remaining_samples = max(
+                            0, total_samples - diarization_chunk_size + 16000
+                        )
+                        if remaining_samples > 0 and len(audio_buffer) > 0:
+                            # Use different variable name to avoid conflict
+                            temp_buffer: List[np.ndarray] = []
+                            samples_left = remaining_samples
+                            for chunk in reversed(audio_buffer):
+                                if samples_left <= 0:
+                                    break
+                                take = min(len(chunk), samples_left)
+                                temp_buffer.insert(0, chunk[-take:])
+                                samples_left -= take
+                            audio_buffer = temp_buffer
+                        else:
+                            audio_buffer = []
+                        continue
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
                     # Create a sliding window with proper timing
