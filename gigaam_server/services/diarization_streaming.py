@@ -205,32 +205,17 @@ class StreamingDiarizationService:
                     # For raw audio with 80000 samples, use step=1/16000 to get correct extent
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
-                        duration=1.0 / SAMPLE_RATE,  # Sample duration
-                        step=1.0 / SAMPLE_RATE,  # One sample per frame
-                    )
-                    logger.debug(
-                        f"Creating waveform: timestamp={timestamp}, "
-                        f"start={window.start}, duration={window.duration}, step={window.step}"
+                        duration=1.0 / SAMPLE_RATE,
+                        step=1.0 / SAMPLE_RATE,
                     )
                     # Reshape to (samples, channels) = (80000, 1) for mono audio
-                    audio_2d = audio_input.reshape(-1, 1)  # (80000,) -> (80000, 1)
+                    audio_2d = audio_input.reshape(-1, 1)
                     waveform = SlidingWindowFeature(audio_2d, window)
-                    logger.debug(
-                        f"Waveform extent: {waveform.extent}, "
-                        f"extent.duration={waveform.extent.duration}"
-                    )
 
                     # Debug: check waveform data shape
                     logger.debug(
-                        f"Waveform data: type={type(waveform.data)}, "
-                        f"shape={waveform.data.shape if hasattr(waveform.data, 'shape') else 'N/A'}, "
-                        f"min={audio_2d.min():.4f}, max={audio_2d.max():.4f}, mean={audio_2d.mean():.4f}"
-                    )
-                    logger.debug(
-                        f"DIART config sample_rate: {pipeline.config.sample_rate}"
-                    )
-                    logger.debug(
-                        f"Expected duration: {pipeline.config.duration}s, samples: {int(pipeline.config.duration * pipeline.config.sample_rate)}"
+                        f"Waveform data: shape={waveform.data.shape}, "
+                        f"amplitude: min={audio_2d.min():.3f}, max={audio_2d.max():.3f}"
                     )
 
                     # Try calling pipeline and catch the actual error with more context
@@ -254,93 +239,31 @@ class StreamingDiarizationService:
 
                         # If segmentation produces output, continue with pipeline
                         if seg_output.shape[0] > 0 and seg_output.shape[-1] > 0:
-                            # WORKAROUND: DIART's __call__ aggregates chunk_buffer before appending current chunk,
-                            # causing division by zero on first call. Manually call components in correct order.
+                        # WORKAROUND: DIART's __call__ aggregates chunk_buffer before appending current chunk,
+                        # causing division by zero on first call. Manually call components in correct order.
 
-                            # Step 1: segmentation (already done)
-                            # Step 2: embedding
-                            embeddings = pipeline.embedding(batch, seg_output)
-                            logger.debug(f"Embeddings shape: {embeddings.shape}")
+                        # Step 1: segmentation (already done)
+                        # Step 2: embedding
+                        embeddings = pipeline.embedding(batch, seg_output)
 
-                            seg_resolution = (
-                                waveform.extent.duration / seg_output.shape[1]
-                            )
-                            sw = SlidingWindow(
-                                start=waveform.extent.start,
-                                duration=seg_resolution,
-                                step=seg_resolution,
-                            )
-                            # Squeeze batch dimension: (1, 293, 3) -> (293, 3)
-                            seg_numpy = seg_output.squeeze(0).cpu().numpy()
-                            logger.debug(
-                                f"Segmentation numpy: shape={seg_numpy.shape}, "
-                                f"min={seg_numpy.min():.4f}, max={seg_numpy.max():.4f}"
-                            )
-                            seg_with_timing = SlidingWindowFeature(seg_numpy, sw)
+                        seg_numpy = seg_output.squeeze(0).cpu().numpy()
+                        seg_resolution = waveform.extent.duration / seg_numpy.shape[1]
+                        sw = SlidingWindow(
+                            start=waveform.extent.start,
+                            duration=seg_resolution,
+                            step=seg_resolution,
+                        )
+                        seg_with_timing = SlidingWindowFeature(seg_numpy, sw)
+                        permuted_seg = pipeline.clustering(seg_with_timing, embeddings[0])
 
-                            logger.debug(
-                                f"Calling clustering with seg shape={seg_with_timing.data.shape}, "
-                                f"emb shape={embeddings[0].shape}"
-                            )
-                            permuted_seg = pipeline.clustering(
-                                seg_with_timing, embeddings[0]
-                            )
-                            logger.debug(
-                                f"Clustering output: shape={permuted_seg.data.shape}, "
-                                f"min={permuted_seg.data.min():.4f}, max={permuted_seg.data.max():.4f}"
-                            )
+                        pipeline.chunk_buffer.append(waveform)
+                        pipeline.pred_buffer.append(permuted_seg)
 
-                            # Append to buffers
-                            logger.debug(
-                                f"Before append: chunk_buffer len={len(pipeline.chunk_buffer)}, "
-                                f"pred_buffer len={len(pipeline.pred_buffer)}"
-                            )
-                            pipeline.chunk_buffer.append(waveform)
-                            pipeline.pred_buffer.append(permuted_seg)
-                            logger.debug(
-                                f"After append: chunk_buffer len={len(pipeline.chunk_buffer)}, "
-                                f"pred_buffer len={len(pipeline.pred_buffer)}"
-                            )
+                        agg_waveform = pipeline.audio_aggregation(pipeline.chunk_buffer)
+                        agg_prediction = pipeline.pred_aggregation(pipeline.pred_buffer)
+                        agg_prediction = pipeline.binarize(agg_prediction)
 
-                            # Debug aggregation parameters
-                            logger.debug(
-                                f"Audio aggregation config: step={pipeline.audio_aggregation.step}, "
-                                f"latency={pipeline.audio_aggregation.latency}, "
-                                f"num_overlapping={pipeline.audio_aggregation.num_overlapping_windows}"
-                            )
-                            if len(pipeline.chunk_buffer) > 0:
-                                logger.debug(
-                                    f"First buffer in chunk_buffer: shape={pipeline.chunk_buffer[0].data.shape}, "
-                                    f"extent={pipeline.chunk_buffer[0].extent}"
-                                )
-
-                            agg_waveform = pipeline.audio_aggregation(
-                                pipeline.chunk_buffer
-                            )
-                            logger.debug(
-                                f"Audio aggregation succeeded: shape={agg_waveform.data.shape}"
-                            )
-                            agg_prediction = pipeline.pred_aggregation(
-                                pipeline.pred_buffer
-                            )
-                            logger.debug(
-                                f"Prediction aggregation succeeded: shape={agg_prediction.data.shape}"
-                            )
-                            agg_prediction = pipeline.binarize(agg_prediction)
-                            logger.debug(
-                                f"Binarization succeeded: tracks={len(list(agg_prediction.itertracks(yield_label=True)))}"
-                            )
-
-                            logger.debug(
-                                f"Manual pipeline succeeded: agg_prediction has "
-                                f"{len(list(agg_prediction.itertracks(yield_label=True)))} tracks"
-                            )
-
-                            result = agg_prediction
-                            logger.debug(
-                                f"Result type: {type(result)}, "
-                                f"is Annotation: {hasattr(result, 'itertracks')}"
-                            )
+                        result = agg_prediction
                         else:
                             logger.warning(
                                 "Segmentation produced no output - no speech detected in chunk"
