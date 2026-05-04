@@ -1,6 +1,7 @@
 """Streaming transcription service for real-time audio."""
 
 import base64
+import asyncio
 from dataclasses import dataclass, field
 from typing import AsyncGenerator, List, Optional
 
@@ -13,6 +14,36 @@ from ..schemas.streaming import (
     StreamingFinalMessage,
     StreamingPartialMessage,
 )
+
+
+async def tee_async_generator(
+    gen: AsyncGenerator, num_copies: int
+) -> List[AsyncGenerator]:
+    """Split an async generator into multiple independent generators."""
+    queues: List[asyncio.Queue] = [asyncio.Queue() for _ in range(num_copies)]
+    done = asyncio.Event()
+
+    async def producer():
+        try:
+            async for item in gen:
+                for queue in queues:
+                    await queue.put(item)
+            done.set()
+        except Exception:
+            done.set()
+            raise
+
+    async def consumer(queue_idx: int):
+        queue = queues[queue_idx]
+        while not done.is_set() or not queue.empty():
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=0.1)
+                yield item
+            except asyncio.TimeoutError:
+                continue
+
+    asyncio.create_task(producer())
+    return [consumer(i) for i in range(num_copies)]
 
 
 @dataclass
@@ -86,9 +117,11 @@ class StreamingService:
         diarization_gen = None
         if enable_diarization and self.diarization_service:
             try:
-                diarization_gen = self.diarization_service.stream_diarize(
-                    audio_generator
+                # Split audio generator so both transcription and diarization get independent streams
+                transcribe_gen, diarization_gen = await tee_async_generator(
+                    audio_generator, 2
                 )
+                audio_generator = transcribe_gen
                 logger.info("Streaming diarization enabled")
             except Exception as e:
                 logger.warning(f"Failed to initialize diarization: {e}")

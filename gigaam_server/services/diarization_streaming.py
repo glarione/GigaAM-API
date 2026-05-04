@@ -265,8 +265,9 @@ class StreamingDiarizationService:
                                 duration=seg_resolution,
                                 step=seg_resolution,
                             )
+                            # Squeeze batch dimension: (1, 293, 3) -> (293, 3)
                             seg_with_timing = SlidingWindowFeature(
-                                seg_output.cpu().numpy(), sw
+                                seg_output.squeeze(0).cpu().numpy(), sw
                             )
                             permuted_seg = pipeline.clustering(
                                 seg_with_timing, embeddings[0]
