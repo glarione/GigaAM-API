@@ -358,12 +358,9 @@ async def stream_audio_to_server(
                 speaker_info = format_speakers(speakers, confidence)
                 display_text = f"{speaker_info}: {text}"
 
-            # Append to transcript instead of replacing
+            # Each result contains full text up to this point, so replace not append
             if text:
-                if full_transcript:
-                    full_transcript += " " + display_text
-                else:
-                    full_transcript = display_text
+                full_transcript = display_text
 
             status = f"Status: Streaming... | {display_text}"
             yield status, full_transcript
