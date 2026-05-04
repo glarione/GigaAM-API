@@ -187,16 +187,15 @@ class StreamingDiarizationService:
                             0, total_samples - diarization_chunk_size + 16000
                         )
                         if remaining_samples > 0 and len(audio_buffer) > 0:
-                            # Use different variable name to avoid conflict
-                            temp_buffer: List[np.ndarray] = []
+                            remaining_buffer: List[np.ndarray] = []
                             samples_left = remaining_samples
                             for chunk in reversed(audio_buffer):
                                 if samples_left <= 0:
                                     break
                                 take = min(len(chunk), samples_left)
-                                temp_buffer.insert(0, chunk[-take:])
+                                remaining_buffer.insert(0, chunk[-take:])
                                 samples_left -= take
-                            audio_buffer = temp_buffer
+                            audio_buffer = remaining_buffer
                         else:
                             audio_buffer = []
                         continue
@@ -250,10 +249,48 @@ class StreamingDiarizationService:
 
                         # If segmentation produces output, continue with pipeline
                         if seg_output.shape[0] > 0 and seg_output.shape[-1] > 0:
-                            result = pipeline([waveform])
-                            logger.debug(
-                                f"Pipeline returned: {type(result)}, length: {len(result) if hasattr(result, '__len__') else 'N/A'}"
+                            # WORKAROUND: DIART's __call__ aggregates chunk_buffer before appending current chunk,
+                            # causing division by zero on first call. Manually call components in correct order.
+
+                            # Step 1: segmentation (already done)
+                            # Step 2: embedding
+                            embeddings = pipeline.embedding(batch, seg_output)
+                            logger.debug(f"Embeddings shape: {embeddings.shape}")
+
+                            seg_resolution = (
+                                waveform.extent.duration / seg_output.shape[1]
                             )
+                            sw = SlidingWindow(
+                                start=waveform.extent.start,
+                                duration=seg_resolution,
+                                step=seg_resolution,
+                            )
+                            seg_with_timing = SlidingWindowFeature(
+                                seg_output.cpu().numpy(), sw
+                            )
+                            permuted_seg = pipeline.clustering(
+                                seg_with_timing, embeddings[0]
+                            )
+                            logger.debug(
+                                f"Clustering updated, permuted_seg shape: {permuted_seg.data.shape}"
+                            )
+
+                            pipeline.chunk_buffer.append(waveform)
+                            pipeline.pred_buffer.append(permuted_seg)
+                            agg_waveform = pipeline.audio_aggregation(
+                                pipeline.chunk_buffer
+                            )
+                            agg_prediction = pipeline.pred_aggregation(
+                                pipeline.pred_buffer
+                            )
+                            agg_prediction = pipeline.binarize(agg_prediction)
+
+                            logger.debug(
+                                f"Manual pipeline succeeded: agg_prediction has "
+                                f"{len(list(agg_prediction.itertracks(yield_label=True)))} tracks"
+                            )
+
+                            result = agg_prediction
                         else:
                             logger.warning(
                                 "Segmentation produced no output - no speech detected in chunk"
@@ -296,15 +333,15 @@ class StreamingDiarizationService:
                             0, total_samples - diarization_chunk_size + 16000
                         )
                         if remaining_samples > 0 and len(audio_buffer) > 0:
-                            temp_buffer: List[np.ndarray] = []
+                            buffer_remaining: List[np.ndarray] = []
                             samples_left = remaining_samples
                             for chunk in reversed(audio_buffer):
                                 if samples_left <= 0:
                                     break
                                 take = min(len(chunk), samples_left)
-                                temp_buffer.insert(0, chunk[-take:])
+                                buffer_remaining.insert(0, chunk[-take:])
                                 samples_left -= take
-                            audio_buffer = temp_buffer
+                            audio_buffer = buffer_remaining
                         else:
                             audio_buffer = []
                         continue
