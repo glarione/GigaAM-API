@@ -114,18 +114,22 @@ class StreamingService:
         is_final = False
 
         # Initialize diarization if enabled
-        diarization_gen = None
+        diarization_result_gen = None
         if enable_diarization and self.diarization_service:
             try:
                 # Split audio generator so both transcription and diarization get independent streams
-                transcribe_gen, diarization_gen = await tee_async_generator(
+                transcribe_audio_gen, diart_audio_gen = await tee_async_generator(
                     audio_generator, 2
                 )
-                audio_generator = transcribe_gen
+                audio_generator = transcribe_audio_gen
+                # Create diarization generator from the split audio stream
+                diarization_result_gen = self.diarization_service.stream_diarize(
+                    diart_audio_gen
+                )
                 logger.info("Streaming diarization enabled")
             except Exception as e:
                 logger.warning(f"Failed to initialize diarization: {e}")
-                diarization_gen = None
+                diarization_result_gen = None
 
         try:
             model = await self.model_manager.get_model(model_name)
@@ -173,11 +177,13 @@ class StreamingService:
 
                         # Get diarization result if enabled
                         diarization_result = None
-                        if diarization_gen:
+                        if diarization_result_gen:
                             try:
-                                diarization_result = await diarization_gen.__anext__()
+                                diarization_result = (
+                                    await diarization_result_gen.__anext__()
+                                )
                             except StopAsyncIteration:
-                                diarization_gen = None
+                                diarization_result_gen = None
 
                         # Yield partial result if changed
                         if text and text != last_text:
@@ -208,18 +214,21 @@ class StreamingService:
             # Final transcription
             final_audio = buffer.get_audio()
             if len(final_audio) > 0:
-                audio_tensor = torch.tensor(final_audio).unsqueeze(0).to(model._device)
-                length = torch.tensor([audio_tensor.shape[-1]]).to(model._device)
+                with torch.no_grad():
+                    audio_tensor = (
+                        torch.tensor(final_audio).unsqueeze(0).to(model._device)
+                    )
+                    length = torch.tensor([audio_tensor.shape[-1]]).to(model._device)
 
-                encoded, encoded_len = model.forward(audio_tensor, length)
-                final_text = decoding.decode(model.head, encoded, encoded_len)[0]
+                    encoded, encoded_len = model.forward(audio_tensor, length)
+                    final_text = decoding.decode(model.head, encoded, encoded_len)[0]
 
                 # Get final diarization result if enabled
                 diarization_result = None
-                if diarization_gen:
+                if diarization_result_gen:
                     try:
                         # Try to get final diarization state
-                        diarization_result = await diarization_gen.__anext__()
+                        diarization_result = await diarization_result_gen.__anext__()
                     except StopAsyncIteration:
                         pass
 
