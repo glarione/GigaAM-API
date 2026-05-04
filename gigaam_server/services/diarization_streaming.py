@@ -407,8 +407,16 @@ class StreamingDiarizationService:
                         speakers = []
                         segments = []
 
+                        logger.debug(
+                            f"Extracting speakers from result: "
+                            f"timestamp={timestamp}, "
+                            f"has itertracks={hasattr(result, 'itertracks')}"
+                        )
+
                         if hasattr(result, "itertracks"):
+                            track_count = 0
                             for turn, _, speaker in result.itertracks(yield_label=True):
+                                track_count += 1
                                 # Convert turn boundaries to seconds
                                 turn_start = turn.start
                                 turn_end = turn.end
@@ -424,10 +432,28 @@ class StreamingDiarizationService:
                                 # Check if segment is active at current timestamp
                                 if turn_start <= timestamp < turn_end:
                                     speakers.append(speaker)
+                                    logger.debug(
+                                        f"Active speaker at {timestamp}: {speaker} "
+                                        f"(segment: {turn_start:.2f}-{turn_end:.2f})"
+                                    )
+
+                            logger.debug(
+                                f"Total tracks in result: {track_count}, "
+                                f"segments: {len(segments)}, "
+                                f"active speakers at {timestamp}: {speakers}"
+                            )
+                        else:
+                            logger.warning("Result has no itertracks method")
 
                         # Calculate confidence (simplified: based on segment count)
                         confidence = len(segments) / 5.0 if segments else 0.0
                         confidence = min(confidence, 1.0)
+
+                        logger.debug(
+                            f"Yielding diarization result: "
+                            f"timestamp={timestamp}, speakers={speakers}, "
+                            f"segments={len(segments)}, confidence={confidence:.2f}"
+                        )
 
                         yield {
                             "timestamp": timestamp,
