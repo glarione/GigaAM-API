@@ -201,15 +201,12 @@ class StreamingDiarizationService:
                         continue
 
                     # Wrap audio in SlidingWindowFeature (DIART expects this format)
-                    # Create a sliding window with proper timing
-                    # Based on DIART source code analysis:
-                    # - segmentation() expects (samples, channels) or (batch, samples, channels)
-                    # - torch.stack of (samples, channels) creates (batch, samples, channels)
-                    # - Then assertion checks batch.shape[1] == samples (correct!)
+                    # The SlidingWindow represents the sample-level resolution, not the chunk duration
+                    # For raw audio with 80000 samples, use step=1/16000 to get correct extent
                     window = SlidingWindow(
                         start=timestamp - (diarization_chunk_size / SAMPLE_RATE),
-                        duration=diarization_chunk_size / SAMPLE_RATE,
-                        step=diarization_chunk_size / SAMPLE_RATE,
+                        duration=1.0 / SAMPLE_RATE,  # Sample duration
+                        step=1.0 / SAMPLE_RATE,  # One sample per frame
                     )
                     logger.debug(
                         f"Creating waveform: timestamp={timestamp}, "
