@@ -211,9 +211,17 @@ class StreamingDiarizationService:
                         duration=diarization_chunk_size / SAMPLE_RATE,
                         step=diarization_chunk_size / SAMPLE_RATE,
                     )
+                    logger.debug(
+                        f"Creating waveform: timestamp={timestamp}, "
+                        f"start={window.start}, duration={window.duration}, step={window.step}"
+                    )
                     # Reshape to (samples, channels) = (80000, 1) for mono audio
                     audio_2d = audio_input.reshape(-1, 1)  # (80000,) -> (80000, 1)
                     waveform = SlidingWindowFeature(audio_2d, window)
+                    logger.debug(
+                        f"Waveform extent: {waveform.extent}, "
+                        f"extent.duration={waveform.extent.duration}"
+                    )
 
                     # Debug: check waveform data shape
                     logger.debug(
