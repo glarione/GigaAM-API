@@ -356,14 +356,14 @@ async def stream_audio_to_server(
             display_text = text
             if enable_diarization and speakers:
                 speaker_info = format_speakers(speakers, confidence)
-                display_text = f"{speaker_info} {text}"
+                display_text = f"{speaker_info}: {text}"
 
             # Append to transcript instead of replacing
             if text:
                 if full_transcript:
-                    full_transcript += " " + text
+                    full_transcript += " " + display_text
                 else:
-                    full_transcript = text
+                    full_transcript = display_text
 
             status = f"Status: Streaming... | {display_text}"
             yield status, full_transcript
@@ -451,10 +451,10 @@ async def batch_process_audio(
             display_text = text
             if enable_diarization and speakers:
                 speaker_info = format_speakers(speakers, confidence)
-                display_text = f"{speaker_info} {text}"
+                display_text = f"{speaker_info}: {text}"
 
             if text:
-                full_transcript = text
+                full_transcript = display_text
 
             status = f"Status: Processing... | {display_text}"
             yield status, full_transcript
@@ -590,11 +590,11 @@ async def stream_transcription(
                 display_text = text
                 if enable_diarization and speakers:
                     speaker_info = format_speakers(speakers, confidence)
-                    display_text = f"{speaker_info} {text}"
+                    display_text = f"{speaker_info}: {text}"
 
-                # Accumulate full transcript
+                # Accumulate full transcript with speaker labels
                 if text:
-                    full_transcript = text
+                    full_transcript = display_text
 
                 # Yield immediately to update UI
                 status = f"Status: Streaming... | {display_text}"
