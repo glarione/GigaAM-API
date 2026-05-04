@@ -337,6 +337,10 @@ class StreamingDiarizationService:
                             )
 
                             result = agg_prediction
+                            logger.debug(
+                                f"Result type: {type(result)}, "
+                                f"is Annotation: {hasattr(result, 'itertracks')}"
+                            )
                         else:
                             logger.warning(
                                 "Segmentation produced no output - no speech detected in chunk"
@@ -350,8 +354,14 @@ class StreamingDiarizationService:
                             ][
                                 0
                             ]  # Get Annotation from (Annotation, SlidingWindowFeature) tuple
+                            logger.debug(f"Unwrapped result from list: {type(result)}")
                         else:
-                            result = None
+                            logger.debug(
+                                f"Result not a list, keeping as-is: {type(result)}"
+                            )
+                            result = (
+                                None if not hasattr(result, "itertracks") else result
+                            )
                     except AssertionError as e:
                         # Pipeline assertion failed - might be a bug in DIART's assertion for 2D input
                         logger.error(f"Pipeline assertion failed: {e}")
