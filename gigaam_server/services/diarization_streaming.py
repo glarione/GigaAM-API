@@ -239,31 +239,39 @@ class StreamingDiarizationService:
 
                         # If segmentation produces output, continue with pipeline
                         if seg_output.shape[0] > 0 and seg_output.shape[-1] > 0:
-                        # WORKAROUND: DIART's __call__ aggregates chunk_buffer before appending current chunk,
-                        # causing division by zero on first call. Manually call components in correct order.
+                            # WORKAROUND: DIART's __call__ aggregates chunk_buffer before appending current chunk,
+                            # causing division by zero on first call. Manually call components in correct order.
 
-                        # Step 1: segmentation (already done)
-                        # Step 2: embedding
-                        embeddings = pipeline.embedding(batch, seg_output)
+                            # Step 1: segmentation (already done)
+                            # Step 2: embedding
+                            embeddings = pipeline.embedding(batch, seg_output)
 
-                        seg_numpy = seg_output.squeeze(0).cpu().numpy()
-                        seg_resolution = waveform.extent.duration / seg_numpy.shape[1]
-                        sw = SlidingWindow(
-                            start=waveform.extent.start,
-                            duration=seg_resolution,
-                            step=seg_resolution,
-                        )
-                        seg_with_timing = SlidingWindowFeature(seg_numpy, sw)
-                        permuted_seg = pipeline.clustering(seg_with_timing, embeddings[0])
+                            seg_numpy = seg_output.squeeze(0).cpu().numpy()
+                            seg_resolution = (
+                                waveform.extent.duration / seg_numpy.shape[1]
+                            )
+                            sw = SlidingWindow(
+                                start=waveform.extent.start,
+                                duration=seg_resolution,
+                                step=seg_resolution,
+                            )
+                            seg_with_timing = SlidingWindowFeature(seg_numpy, sw)
+                            permuted_seg = pipeline.clustering(
+                                seg_with_timing, embeddings[0]
+                            )
 
-                        pipeline.chunk_buffer.append(waveform)
-                        pipeline.pred_buffer.append(permuted_seg)
+                            pipeline.chunk_buffer.append(waveform)
+                            pipeline.pred_buffer.append(permuted_seg)
 
-                        agg_waveform = pipeline.audio_aggregation(pipeline.chunk_buffer)
-                        agg_prediction = pipeline.pred_aggregation(pipeline.pred_buffer)
-                        agg_prediction = pipeline.binarize(agg_prediction)
+                            agg_waveform = pipeline.audio_aggregation(
+                                pipeline.chunk_buffer
+                            )
+                            agg_prediction = pipeline.pred_aggregation(
+                                pipeline.pred_buffer
+                            )
+                            agg_prediction = pipeline.binarize(agg_prediction)
 
-                        result = agg_prediction
+                            result = agg_prediction
                         else:
                             logger.warning(
                                 "Segmentation produced no output - no speech detected in chunk"
