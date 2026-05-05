@@ -2,14 +2,14 @@
 
 import os
 import traceback
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator
 
 import numpy as np
 import torch
 from diart import SpeakerDiarization, SpeakerDiarizationConfig
-from pyannote.core import SlidingWindowFeature, SlidingWindow
 from huggingface_hub import login
 from loguru import logger
+from pyannote.core import SlidingWindow, SlidingWindowFeature
 
 from gigaam.preprocess import SAMPLE_RATE
 
@@ -79,14 +79,11 @@ class StreamingDiarizationService:
         except Exception as e:
             logger.error(f"Failed to load DIART pipeline: {e}")
             raise
-        except Exception as e:
-            logger.error(f"Failed to load DIART pipeline: {e}")
-            raise
 
     async def stream_diarize(
         self,
         audio_generator: AsyncGenerator[bytes, None],
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
         Stream diarization results alongside audio chunks.
 
@@ -169,7 +166,7 @@ class StreamingDiarizationService:
                             0, total_samples - diarization_chunk_size + 16000
                         )
                         if remaining_samples > 0 and len(audio_buffer) > 0:
-                            remaining_buffer: List[np.ndarray] = []
+                            remaining_buffer: list[np.ndarray] = []
                             samples_left = remaining_samples
                             for chunk in reversed(audio_buffer):
                                 if samples_left <= 0:
@@ -296,7 +293,7 @@ class StreamingDiarizationService:
                             0, total_samples - diarization_chunk_size + 16000
                         )
                         if remaining_samples > 0 and len(audio_buffer) > 0:
-                            buffer_remaining: List[np.ndarray] = []
+                            buffer_remaining: list[np.ndarray] = []
                             samples_left = remaining_samples
                             for chunk in reversed(audio_buffer):
                                 if samples_left <= 0:
@@ -384,7 +381,7 @@ class StreamingDiarizationService:
                     )
                     if remaining_samples > 0 and len(audio_buffer) > 0:
                         # Rebuild buffer with remaining audio
-                        new_buffer: List[np.ndarray] = []
+                        new_buffer: list[np.ndarray] = []
                         samples_left = remaining_samples
                         for chunk in reversed(audio_buffer):
                             if samples_left <= 0:
@@ -406,7 +403,7 @@ class StreamingDiarizationService:
         self._pipeline = None
 
     @classmethod
-    def fast_config(cls) -> Dict[str, float]:
+    def fast_config(cls) -> dict[str, float]:
         """Fast preset: lower latency, slightly less accurate."""
         return {
             "latency": 0.5,
@@ -416,7 +413,7 @@ class StreamingDiarizationService:
         }
 
     @classmethod
-    def quality_config(cls) -> Dict[str, float]:
+    def quality_config(cls) -> dict[str, float]:
         """Quality preset: higher latency, better accuracy."""
         return {
             "latency": 2.0,

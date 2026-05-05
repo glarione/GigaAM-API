@@ -41,8 +41,8 @@ class ServerSettings(BaseSettings):
 
     # Diarization settings
     diarization_enabled: bool = True
-    diarization_step: float = 0.5
-    diarization_latency: float = 0.5
+    diarization_step: float = 2
+    diarization_latency: float = 2
     diarization_tau_active: float = 0.507
     diarization_rho_update: float = 0.3
     diarization_delta_new: float = 1.2

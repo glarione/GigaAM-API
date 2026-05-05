@@ -1,9 +1,8 @@
 """Streaming transcription service for real-time audio."""
 
-import base64
 import asyncio
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator
 
 import numpy as np
 import torch
@@ -18,9 +17,9 @@ from ..schemas.streaming import (
 
 async def tee_async_generator(
     gen: AsyncGenerator, num_copies: int
-) -> List[AsyncGenerator]:
+) -> list[AsyncGenerator]:
     """Split an async generator into multiple independent generators."""
-    queues: List[asyncio.Queue] = [asyncio.Queue() for _ in range(num_copies)]
+    queues: list[asyncio.Queue] = [asyncio.Queue() for _ in range(num_copies)]
     done = asyncio.Event()
 
     async def producer():
@@ -50,7 +49,7 @@ async def tee_async_generator(
 class AudioBuffer:
     """Buffer for streaming audio chunks."""
 
-    samples: List[np.ndarray] = field(default_factory=list)
+    samples: list[np.ndarray] = field(default_factory=list)
     max_size: int = 16000 * 60  # 60 seconds max buffer
 
     def add(self, chunk: np.ndarray) -> None:
