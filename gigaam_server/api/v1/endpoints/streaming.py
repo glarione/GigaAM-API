@@ -67,7 +67,7 @@ async def websocket_streaming(websocket: WebSocket):
 
     query_params = dict(websocket.query_params)
     logger.debug(f"Query parameters received: {query_params}")
-    model_name = query_params.get("model", "v3_ctc")
+    model_name = query_params.get("model", "v3_e2e_rnnt")
 
     # Check if diarization is enabled
     enable_diarization = query_params.get("diarization", "false").lower() == "true"

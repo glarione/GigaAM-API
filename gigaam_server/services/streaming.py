@@ -86,8 +86,8 @@ class StreamingService:
         self.model_manager = model_manager
         self.settings = settings
         self.diarization_service = diarization_service
-        self._chunk_size = 16000  # 1 second chunks
-        self._overlap_size = 8000  # 0.5 second overlap for context
+        self._chunk_size = 32000  # 1 second chunks
+        self._overlap_size = 2000  # 0.5 second overlap for context
 
     async def stream_transcribe(
         self,
@@ -111,7 +111,6 @@ class StreamingService:
         """
         buffer = AudioBuffer()
         last_text = ""
-        is_final = False
 
         # Initialize diarization if enabled
         diarization_result_gen = None

@@ -234,6 +234,7 @@ class STTClient:
         try:
             async for message in self.websocket:
                 data = json.loads(message)
+                print(f"yielding: \n {data}")
                 yield data
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")
@@ -341,6 +342,7 @@ async def stream_audio_to_server(
         # Send final signal
         await stt_client.send_final()
 
+        display_text = ""
         # Receive results and append to transcript
         async for result in stt_client.receive_results():
             text = result.get("text", "")
@@ -360,15 +362,15 @@ async def stream_audio_to_server(
 
             # Each result contains full text up to this point, so replace not append
             if text:
-                full_transcript = display_text
+                full_transcript += display_text
 
             status = f"Status: Streaming... | {display_text}"
-            yield status, full_transcript
+            if not is_final:
+                yield status, full_transcript
+            else:
+               break
 
-            if is_final:
-                break
-
-        yield "Stream completed", full_transcript
+        yield "Stream completed", display_text
 
     except Exception as e:
         yield f"Error: {str(e)}", full_transcript
