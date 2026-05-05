@@ -324,24 +324,23 @@ class StreamingDiarizationService:
                             track_count = 0
                             for turn, _, speaker in result.itertracks(yield_label=True):
                                 track_count += 1
-                                # Convert turn boundaries to seconds
-                                turn_start = turn.start
-                                turn_end = turn.end
+                                chunk_start = timestamp - 5.0
+                                turn_start_abs = chunk_start + turn.start
+                                turn_end_abs = chunk_start + turn.end
 
                                 segments.append(
                                     {
                                         "speaker": speaker,
-                                        "start": float(turn_start),
-                                        "end": float(turn_end),
+                                        "start": float(turn_start_abs),
+                                        "end": float(turn_end_abs),
                                     }
                                 )
 
-                                # Check if segment is active at current timestamp
-                                if turn_start <= timestamp < turn_end:
+                                if turn_start_abs <= timestamp < turn_end_abs:
                                     speakers.append(speaker)
                                     logger.debug(
-                                        f"Active speaker at {timestamp}: {speaker} "
-                                        f"(segment: {turn_start:.2f}-{turn_end:.2f})"
+                                        f"Active speaker at {timestamp:.1f}s: {speaker} "
+                                        f"(segment: {turn_start_abs:.2f}-{turn_end_abs:.2f}s)"
                                     )
 
                             logger.debug(
