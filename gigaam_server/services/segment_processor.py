@@ -101,6 +101,10 @@ class SegmentProcessor:
         else:
             decoding = model.decoding
 
+        # Track audio for continuous transcription (when diarization disabled)
+        continuous_audio = []
+        continuous_start = 0.0
+
         # Process audio chunks
         async for audio_bytes in audio_generator:
             if len(audio_bytes) == 0:
@@ -110,6 +114,54 @@ class SegmentProcessor:
                 # Decode and buffer audio
                 audio_chunk = self._decode_audio(audio_bytes)
                 self._update_buffer(audio_chunk)
+
+                # If no diarization, accumulate audio for continuous transcription
+                if not pipeline:
+                    continuous_audio.append(audio_chunk)
+
+                    # Transcribe every 3 seconds of accumulated audio
+                    accumulated_duration = (
+                        len(np.concatenate(continuous_audio)) / SAMPLE_RATE
+                    )
+                    if accumulated_duration >= 3.0:
+                        segment_audio = np.concatenate(continuous_audio)
+
+                        # VAD check
+                        if self._is_speech(segment_audio):
+                            logger.debug(
+                                f"Transcribing continuous audio: {accumulated_duration:.1f}s"
+                            )
+                            text = await self._transcribe_segment(
+                                segment_audio, model, decoding
+                            )
+
+                            if text:
+                                yield {
+                                    "speaker": None,
+                                    "text": text,
+                                    "start": continuous_start,
+                                    "end": continuous_start + accumulated_duration,
+                                    "is_final": False,
+                                }
+
+                            # Reset buffer (keep last 0.5s for overlap)
+                            overlap_samples = int(0.5 * SAMPLE_RATE)
+                            if len(segment_audio) > overlap_samples:
+                                continuous_audio = [segment_audio[-overlap_samples:]]
+                                continuous_start = (
+                                    continuous_start + accumulated_duration - 0.5
+                                )
+                            else:
+                                continuous_audio = []
+                                continuous_start = (
+                                    continuous_start + accumulated_duration
+                                )
+                        else:
+                            logger.debug(
+                                f"Skipping silent continuous audio: {accumulated_duration:.1f}s"
+                            )
+                            continuous_audio = []
+                            continuous_start = continuous_start + accumulated_duration
 
                 # Run diarization every 3s if enabled
                 if pipeline and self._should_run_diarization():
@@ -163,6 +215,23 @@ class SegmentProcessor:
             except Exception as e:
                 logger.error(f"Error processing audio chunk: {e}")
                 continue
+
+        # Final transcription for continuous mode (no diarization)
+        if not pipeline and continuous_audio:
+            segment_audio = np.concatenate(continuous_audio)
+            if self._is_speech(segment_audio) and len(segment_audio) > 0:
+                logger.debug(
+                    f"Final transcription: {len(segment_audio) / SAMPLE_RATE:.1f}s"
+                )
+                text = await self._transcribe_segment(segment_audio, model, decoding)
+                if text:
+                    yield {
+                        "speaker": None,
+                        "text": text,
+                        "start": continuous_start,
+                        "end": continuous_start + len(segment_audio) / SAMPLE_RATE,
+                        "is_final": True,
+                    }
 
         # Transcribe any remaining segments at end of stream
         if pipeline:

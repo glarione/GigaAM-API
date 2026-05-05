@@ -5,12 +5,12 @@ import base64
 import json
 import queue
 import time
-from typing import AsyncGenerator, Optional, List
+from typing import AsyncGenerator, List, Optional
 
 import gradio as gr
 import numpy as np
-import websockets
 import sounddevice as sd
+import websockets
 from loguru import logger
 
 # Audio configuration
@@ -74,7 +74,7 @@ class AudioRecorder:
 
     def get_duration(self) -> float:
         """Get recording duration in seconds."""
-        total_samples = sum(len(chunk) for chunk in self.chunks)
+        total_samples: int = sum(len(chunk) for chunk in self.chunks)
         return total_samples / self.sample_rate
 
 
@@ -242,13 +242,15 @@ class STTClient:
             print(f"Error receiving results: {e}")
 
 
-def format_speakers(speakers: list, confidence: float) -> str:
+def format_speakers(speakers: list, confidence: Optional[float]) -> str:
     """Format speaker information for display."""
     if not speakers:
         return ""
 
     speaker_str = ", ".join(speakers)
-    return f"[{speaker_str} (confidence: {confidence:.2f})]"
+    if confidence is not None:
+        return f"[{speaker_str} (confidence: {confidence:.2f})]"
+    return f"[{speaker_str}]"
 
 
 async def stream_audio_to_server(
@@ -419,7 +421,7 @@ async def batch_process_audio(
         return
 
     full_transcript = ""
-    last_speakers = []
+    last_speakers: List[str] = []
     last_confidence = 0.0
 
     try:
@@ -709,14 +711,14 @@ def create_gradio_interface():
                     label="Recording Status", interactive=False, value="⏹️ Not recording"
                 )
 
-                # Audio component for playback (visible after recording)
                 audio_output = gr.Audio(
-                    label="Recorded Audio (click to play)",
+                    label="Recorded/Uploaded Audio (click to play or upload file)",
                     type="numpy",
                     interactive=True,
                     visible=True,
                     autoplay=False,
                     show_label=True,
+                    sources=["upload", "microphone"],
                 )
 
                 # Hidden state to store recorded audio
@@ -781,6 +783,25 @@ def create_gradio_interface():
             outputs=[status, transcript],
         )
 
+        def extract_audio_array(audio):
+            """Extract numpy array from gradio audio input (handles dict, tuple, and array)."""
+            if audio is None:
+                return None
+            if isinstance(audio, np.ndarray):
+                return audio
+            if isinstance(audio, tuple) and len(audio) == 2:
+                # Gradio tuple format: (sample_rate, array)
+                return audio[1]
+            if isinstance(audio, dict):
+                return audio.get("array", None)
+            return None
+
+        audio_output.change(
+            fn=extract_audio_array,
+            inputs=[audio_output],
+            outputs=[recorded_audio_state],
+        )
+
         gr.Markdown("---")
         gr.Markdown(
             """
@@ -800,17 +821,14 @@ def create_gradio_interface():
             4. Enable Diarization: Check if server has DIART enabled
             5. Click Start Streaming: Begin real-time microphone transcription
             
-            ### Record & Stream
-            1. Select "Record & Stream" mode
+            ### Record & Stream / Batch Process
+            1. Select "Record & Stream" or "Batch Process" mode
             2. Click Start Recording: Record audio from microphone
             3. Click Stop Recording: Stop recording
-            4. Click Stream Recorded Audio: Send recorded audio to server chunk-by-chunk
+            4. **OR upload an audio file** directly to the Audio component
+            5. Click Stream Recorded Audio or Batch Process Audio to send to server
             
-            ### Batch Process
-            1. Select "Batch Process" mode
-            2. Click Start Recording: Record audio from microphone
-            3. Click Stop Recording: Stop recording
-            4. Click Batch Process Audio: Send entire recording as a single file
+            **File Upload**: You can also upload audio files (WAV, MP3, etc.) directly to the Audio component. The uploaded audio will automatically be available for streaming or batch processing.
             
             The tool will:
             - Capture audio from your microphone

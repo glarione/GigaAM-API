@@ -76,6 +76,10 @@ class StreamingService:
             self.model_manager, self.settings, self.diarization_service
         )
 
+        # Accumulate all text for final message
+        accumulated_text = ""
+        all_segments = []
+
         async for result in processor.process_stream(
             audio_generator, model_name, enable_diarization
         ):
@@ -88,19 +92,27 @@ class StreamingService:
             # Add diarization info if available
             if enable_diarization:
                 message.speakers = [result.get("speaker", "")]
-                message.active_segments = [
-                    {
-                        "speaker": result.get("speaker"),
-                        "start": result.get("start", 0.0),
-                        "end": result.get("end", 0.0),
-                    }
-                ]
+                segment_info = {
+                    "speaker": result.get("speaker"),
+                    "start": result.get("start", 0.0),
+                    "end": result.get("end", 0.0),
+                }
+                message.active_segments = [segment_info]
+                all_segments.append(segment_info)
+
+            # Accumulate text
+            text = result.get("text", "")
+            if text:
+                if accumulated_text and text.startswith(accumulated_text):
+                    pass  # Partial update, keep as is
+                else:
+                    accumulated_text = text
 
             yield message
 
-        # Send final message
+        # Send final message with accumulated text
         yield StreamingFinalMessage(
-            text="",
-            segments=[],
+            text=accumulated_text,
+            segments=all_segments if enable_diarization else [],
             is_final=True,
         )
