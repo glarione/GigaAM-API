@@ -343,7 +343,6 @@ async def stream_audio_to_server(
         await stt_client.send_final()
 
         display_text = ""
-        # Receive results and append to transcript
         async for result in stt_client.receive_results():
             text = result.get("text", "")
             is_final = result.get("is_final", False)
@@ -360,15 +359,17 @@ async def stream_audio_to_server(
                 speaker_info = format_speakers(speakers, confidence)
                 display_text = f"{speaker_info}: {text}"
 
-            # Each result contains full text up to this point, so replace not append
             if text:
-                full_transcript += display_text
+                if full_transcript and text.startswith(full_transcript):
+                    full_transcript = text
+                else:
+                    full_transcript = text
 
             status = f"Status: Streaming... | {display_text}"
-            if not is_final:
-                yield status, full_transcript
-            else:
-               break
+            yield status, full_transcript
+
+            if is_final:
+                break
 
         yield "Stream completed", display_text
 
