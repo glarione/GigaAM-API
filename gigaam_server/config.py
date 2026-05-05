@@ -39,6 +39,14 @@ class ServerSettings(BaseSettings):
     hf_token: str | None = None
     segmentation_model: str = "pyannote/speaker-diarization-community-1"
 
+    # Diarization settings
+    diarization_enabled: bool = True
+    diarization_step: float = 0.5
+    diarization_latency: float = 0.5
+    diarization_tau_active: float = 0.507
+    diarization_rho_update: float = 0.3
+    diarization_delta_new: float = 1.2
+
     # Performance settings
     max_audio_duration: float = 3600.0  # 1 hour max
     max_file_size: int = 500 * 1024 * 1024  # 500MB

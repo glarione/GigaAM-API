@@ -1,8 +1,9 @@
 """Streaming speaker diarization using DIART."""
 
+import os
+import traceback
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import os
 import numpy as np
 import torch
 from diart import SpeakerDiarization, SpeakerDiarizationConfig
@@ -14,39 +15,20 @@ from gigaam.preprocess import SAMPLE_RATE
 
 
 class StreamingDiarizationService:
-    """
-    DIART-based streaming speaker diarization.
-
-    Provides real-time speaker identification during audio streaming.
-    Uses incremental clustering to update speaker assignments as
-    the conversation progresses.
-
-    Example:
-        service = StreamingDiarizationService(settings)
-        async for result in service.stream_diarize(audio_generator):
-            print(f"Active speakers: {result['speakers']}")
-    """
-
     def __init__(self, settings):
-        """
-        Initialize streaming diarization service.
-
-        Args:
-            settings: Application settings with device configuration
-        """
+        """Initialize streaming diarization service."""
         self.settings = settings
         self._pipeline = None
         self._device = torch.device(
             settings.device if torch.cuda.is_available() else "cpu"
         )
 
-        # Default configuration (DIHARD III optimized)
         self._config = {
-            "step": 0.5,  # 500ms chunk shift
-            "latency": 0.5,  # Minimum latency
-            "tau_active": 0.555,
-            "rho_update": 0.422,
-            "delta_new": 1.517,
+            "step": settings.diarization_step,
+            "latency": settings.diarization_latency,
+            "tau_active": settings.diarization_tau_active,
+            "rho_update": settings.diarization_rho_update,
+            "delta_new": settings.diarization_delta_new,
         }
 
     async def get_pipeline(self):
@@ -420,16 +402,8 @@ class StreamingDiarizationService:
             raise
 
     def configure(self, **kwargs):
-        """
-        Configure diarization parameters.
-
-        Args:
-            **kwargs: Configuration parameters (latency, tau_active, etc.)
-        """
         self._config.update(kwargs)
-        logger.info(f"Diarization configuration updated: {kwargs}")
-
-        # Reset pipeline to apply new config
+        logger.info(f"Diarization config updated: {kwargs}")
         self._pipeline = None
 
     @classmethod
