@@ -41,44 +41,32 @@ class StreamingDiarizationService:
         if self._pipeline is not None:
             return self._pipeline
 
-        try:
-            # Login to HuggingFace using HF_TOKEN environment variable (consistent with batch diarization)
-            hf_token = os.getenv("HF_TOKEN")
-            if hf_token:
-                login(token=hf_token)
-                logger.info("Logged in to HuggingFace using HF_TOKEN")
-            else:
-                logger.warning(
-                    "HF_TOKEN not found. DIART requires pyannote models which need authentication. "
-                    "Set HF_TOKEN environment variable or add to .env file."
-                )
-
-            # Configure pipeline
-            config = SpeakerDiarizationConfig(
-                step=self._config["step"],
-                latency=self._config["latency"],
-                tau_active=self._config["tau_active"],
-                rho_update=self._config["rho_update"],
-                delta_new=self._config["delta_new"],
+        hf_token = os.getenv("HF_TOKEN")
+        if hf_token:
+            login(token=hf_token)
+            logger.info("Logged in to HuggingFace using HF_TOKEN")
+        else:
+            logger.warning(
+                "HF_TOKEN not found. DIART requires pyannote models which need authentication. "
+                "Set HF_TOKEN environment variable or add to .env file."
             )
 
-            self._pipeline = SpeakerDiarization(config)
-            # DIART handles device placement internally, no need to call .to()
-            logger.info(
-                f"DIART streaming diarization pipeline loaded "
-                f"(device={self._device}, latency={self._config['latency']}s)"
-            )
-            return self._pipeline
+        # Configure pipeline
+        config = SpeakerDiarizationConfig(
+            step=self._config["step"],
+            latency=self._config["latency"],
+            tau_active=self._config["tau_active"],
+            rho_update=self._config["rho_update"],
+            delta_new=self._config["delta_new"],
+        )
 
-        except ImportError as e:
-            logger.error(
-                "DIART not installed. Install with: "
-                "pip install gigaam[streaming-diarization]"
-            )
-            raise
-        except Exception as e:
-            logger.error(f"Failed to load DIART pipeline: {e}")
-            raise
+        self._pipeline = SpeakerDiarization(config)
+        # DIART handles device placement internally, no need to call .to()
+        logger.info(
+            f"DIART streaming diarization pipeline loaded "
+            f"(device={self._device}, latency={self._config['latency']}s)"
+        )
+        return self._pipeline
 
     async def stream_diarize(
         self,

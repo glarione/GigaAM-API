@@ -56,7 +56,7 @@ class SegmentProcessor:
         self.processing_segments: Set[str] = set()
 
         # VAD threshold (energy-based)
-        self.vad_threshold = 0.3
+        self.vad_threshold = 0.1
 
         # Diarization configuration
         self.diarization_interval = 3.0  # Run every 3 seconds

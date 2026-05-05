@@ -19,7 +19,6 @@ from pyannote.audio.pipelines import SpeakerDiarization
 torch.serialization.add_safe_globals([Problem, Resolution, Specifications])
 
 
-
 class DiarizationService:
     """
     Speaker diarization using pyannote.audio.

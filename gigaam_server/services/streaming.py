@@ -45,8 +45,6 @@ class AudioBuffer:
 class StreamingService:
     """
     Real-time streaming transcription service.
-
-    Uses CTC model with streaming-friendly decoding.
     Provides partial results during processing.
     """
 
@@ -65,12 +63,6 @@ class StreamingService:
     ) -> AsyncGenerator[
         StreamingPartialMessage | StreamingFinalMessage | StreamingErrorMessage, None
     ]:
-        """
-        Stream transcription from audio chunks using segment-based processing.
-
-        Uses SegmentProcessor for VAD filtering and segment-based transcription
-        with speaker attribution.
-        """
         # Use SegmentProcessor for modern segment-based processing
         processor = SegmentProcessor(
             self.model_manager, self.settings, self.diarization_service
