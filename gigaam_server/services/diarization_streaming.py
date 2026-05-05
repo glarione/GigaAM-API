@@ -220,12 +220,6 @@ class StreamingDiarizationService:
 
                     # Try calling pipeline and catch the actual error with more context
                     try:
-                        # Run diarization inference - pipeline expects Sequence[SlidingWindowFeature]
-                        import traceback
-
-                        logger.debug("Calling DIART pipeline...")
-
-                        # Debug: check if segmentation produces output
                         logger.debug(f"Calling segmentation model directly...")
                         batch = torch.stack(
                             [torch.from_numpy(w.data) for w in [waveform]]

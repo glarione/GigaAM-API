@@ -78,13 +78,10 @@ async def websocket_streaming(websocket: WebSocket):
     try:
         from ....services.streaming import StreamingService
 
-        # Initialize diarization service if enabled
+        # Use pre-initialized streaming diarization service if enabled
         diarization_service = None
         if enable_diarization:
-            from ....services.diarization_streaming import StreamingDiarizationService
-
-            diarization_service = StreamingDiarizationService(app.state.settings)
-            # Configure latency if specified
+            diarization_service = app.state.streaming_diarization_service
             if diarization_latency != 0.5:
                 diarization_service.configure(latency=diarization_latency)
 

@@ -40,13 +40,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize diarization service (singleton for pipeline caching)
     from .services.diarization import DiarizationService
+    from .services.diarization_streaming import StreamingDiarizationService
 
     diarization_service = DiarizationService(settings)
-    # Pre-warm the pipeline on startup
+    streaming_diarization_service = StreamingDiarizationService(settings)
+
     await diarization_service.get_diarization_pipeline()
+    await streaming_diarization_service.get_pipeline()
 
     app.state.model_manager = model_manager
     app.state.diarization_service = diarization_service
+    app.state.streaming_diarization_service = streaming_diarization_service
     app.state.settings = settings
 
     yield
