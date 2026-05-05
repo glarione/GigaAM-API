@@ -294,7 +294,7 @@ async def stream_audio_to_server(
         # Convert audio to chunks and send (1-second chunks aligned to frame size)
         chunk_size = int(SAMPLE_RATE * 1.0)  # 1 second chunks (16000 samples)
         frame_size = 160  # 10ms at 16kHz - model frame size
-        overlap_size = int(SAMPLE_RATE * 0.5)  # 50% overlap
+        overlap_size = int(SAMPLE_RATE * 0.0)  # 50% overlap
 
         async def audio_generator():
             pos = 0
