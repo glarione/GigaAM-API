@@ -95,7 +95,7 @@ async def websocket_streaming(websocket: WebSocket):
             enable_diarization=enable_diarization,
         ):
             try:
-                print(f"{message=}")
+                logger.debug(f"{message=}")
                 await websocket.send_json(message.model_dump())
             except RuntimeError:
                 connection_closed = True
