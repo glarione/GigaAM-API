@@ -100,12 +100,14 @@ class StreamingService:
                 message.active_segments = [segment_info]
                 all_segments.append(segment_info)
 
-            # Accumulate text
+            # Accumulate text (concatenate for continuous mode, replace for partial updates)
             text = result.get("text", "")
             if text:
-                if accumulated_text and text.startswith(accumulated_text):
-                    pass  # Partial update, keep as is
+                if not enable_diarization:
+                    # Continuous mode: concatenate all transcriptions
+                    accumulated_text += text + " "
                 else:
+                    # Diarization mode: keep latest (segments are independent)
                     accumulated_text = text
 
             yield message
