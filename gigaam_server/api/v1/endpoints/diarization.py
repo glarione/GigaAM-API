@@ -33,6 +33,10 @@ class StreamingAudioSource(AudioSource):
     def stream(self):
         return self._stream
 
+    @stream.setter
+    def stream(self, value):
+        self._stream = value
+
     @property
     def duration(self):
         return None
