@@ -220,10 +220,11 @@ async def process_diarization(server_url: str, latency: float, duration: float):
         finally:
             recorder.stop_recording()
 
-        # Stream results
-        last_timestamp = 0.0
-        all_segments = []
+    # Stream results
+    last_timestamp = 0.0
+    all_segments = []
 
+    try:
         async for result in audio_stream():
             if "error" in result:
                 yield f"Error: {result['error']}", "", ""
@@ -251,6 +252,10 @@ async def process_diarization(server_url: str, latency: float, duration: float):
 
             if is_final:
                 break
+    except Exception as e:
+        yield f"Error: {str(e)}", "", ""
+    finally:
+        recorder.stop_recording()
 
 
 def create_gradio_interface():

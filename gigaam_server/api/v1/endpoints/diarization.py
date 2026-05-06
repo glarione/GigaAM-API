@@ -1,75 +1,263 @@
-"""Diarization-only streaming endpoint."""
+"""Diarization-only streaming endpoint using DIART's StreamingInference."""
 
-import base64
+import asyncio
 import json
+import threading
+import time
 from typing import AsyncGenerator
 
+import numpy as np
+import rx
 from fastapi import APIRouter, WebSocket
 from loguru import logger
+from rx import operators as ops
 
 from gigaam_server.api.v1.endpoints.streaming import audio_stream_generator
+from gigaam_server.main import get_app
 
 router = APIRouter(prefix="/v1/diarization", tags=["diarization"])
+
+# Import DIART
+try:
+    from diart import SpeakerDiarization, SpeakerDiarizationConfig
+    from diart.inference import StreamingInference
+    from diart.sinks import PredictionAccumulator
+    from diart.sources import AudioSource
+
+    DIART_AVAILABLE = True
+except ImportError:
+    DIART_AVAILABLE = False
+    logger.warning("DIART not installed")
+
+
+class StreamingAudioSource(AudioSource):
+    """Custom AudioSource that receives audio from async generator."""
+
+    def __init__(self, sample_rate: int = 16000, block_duration: float = 0.5):
+        super().__init__(uri="stream", sample_rate=sample_rate)
+        self._stream = rx.subject.Subject()
+        self._chunk_size = int(sample_rate * block_duration)
+        self._audio_buffer: list[np.ndarray] = []
+        self._is_running = False
+
+    @property
+    def stream(self):
+        return self._stream
+
+    @property
+    def duration(self):
+        return None
+
+    def start_feeding(self, audio_generator: AsyncGenerator[bytes, None]):
+        """Feed audio chunks from async generator in background."""
+        self._is_running = True
+
+        def feed_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            async def process():
+                try:
+                    async for audio_bytes in audio_generator:
+                        if len(audio_bytes) == 0:
+                            continue
+
+                        # Decode audio
+                        audio_np = (
+                            np.frombuffer(audio_bytes, dtype=np.int16).astype(
+                                np.float32
+                            )
+                            / 32768.0
+                        )
+                        self._audio_buffer.append(audio_np)
+
+                        # Emit complete chunks
+                        while len(self._audio_buffer) >= self._chunk_size:
+                            chunk = np.concatenate(
+                                self._audio_buffer[: self._chunk_size]
+                            )
+                            self._audio_buffer = self._audio_buffer[self._chunk_size :]
+                            self._stream.on_next(chunk)
+
+                    # Emit remaining
+                    if self._audio_buffer:
+                        remaining = np.concatenate(self._audio_buffer)
+                        if len(remaining) < self._chunk_size:
+                            remaining = np.pad(
+                                remaining, (0, self._chunk_size - len(remaining))
+                            )
+                        self._stream.on_next(remaining)
+
+                    self._stream.on_completed()
+                except Exception as e:
+                    logger.error(f"Feed error: {e}")
+                    self._stream.on_error(e)
+                finally:
+                    self._is_running = False
+                    loop.stop()
+
+            loop.create_task(process())
+            loop.run_forever()
+            loop.close()
+
+    def read(self):
+        """Blocking wait (called by StreamingInference)."""
+        pass
+
+    def close(self):
+        if not self._stream.is_stopped:
+            self._stream.on_completed()
 
 
 @router.websocket("/ws")
 async def websocket_diarization(websocket: WebSocket):
     """
-    WebSocket endpoint for real-time speaker diarization only.
+    WebSocket endpoint for real-time speaker diarization.
 
-    Client sends base64-encoded audio chunks.
-    Server returns speaker segments with timestamps (no transcription).
+    Uses DIART's StreamingInference for robust speaker segmentation.
 
     Query parameters:
-    - latency: Algorithmic latency in seconds (0.5-5.0, default: 0.5)
-      - 0.5s: Fastest, lowest accuracy
-      - 1.0s: Good balance
-      - 2.0s+: Better accuracy, higher delay
+    - latency: Algorithmic latency (0.5-5.0s, default: 0.5)
     """
-    from gigaam_server.main import get_app
-    logger.debug(f"Diarization WebSocket connection attempt from {websocket.client}")
+    logger.debug(f"Diarization WS connection from {websocket.client}")
     await websocket.accept()
-    logger.info("Diarization WebSocket connection accepted")
+    logger.info("Diarization WS accepted")
 
-    app = get_app()
-    diarization_service = app.state.streaming_diarization_service
+    if not DIART_AVAILABLE:
+        await websocket.send_json({"error": "DIART not installed", "is_final": True})
+        await websocket.close()
+        return
 
-    # Get query parameters
+    # Get parameters
     latency = float(websocket.query_params.get("latency", 0.5))
-    logger.debug(f"Query parameters received: {{'latency': {latency}}}")
-
-    # Configure service if needed
-    if latency != 0.5:
-        diarization_service.configure(latency=latency)
-        logger.info(f"Diarization latency configured to {latency}s")
-
-    connection_closed = False
+    logger.debug(f"Latency: {latency}s")
 
     try:
-        # Process stream with diarization only
-        async for result in diarization_service.stream_diarize(
-            audio_stream_generator(websocket)
-        ):
+        # Create pipeline
+        config = SpeakerDiarizationConfig(
+            step=0.5,
+            latency=latency,
+            tau_active=0.555,
+            rho_update=0.422,
+            delta_new=1.517,
+            sample_rate=16000,
+        )
+        pipeline = SpeakerDiarization(config)
+
+        # Create audio source
+        source = StreamingAudioSource(sample_rate=16000, block_duration=0.5)
+
+        # Create accumulator
+        accumulator = PredictionAccumulator(uri="stream")
+
+        # Start feeding audio
+        feed_thread = threading.Thread(
+            target=source.start_feeding,
+            args=(audio_stream_generator(websocket),),
+            daemon=True,
+        )
+        feed_thread.start()
+
+        # Create inference
+        inference = StreamingInference(
+            pipeline,
+            source,
+            batch_size=1,
+            do_plot=False,
+            show_progress=False,
+        )
+        inference.attach_observers(accumulator)
+
+        # Run inference in background
+        def run_inference():
             try:
-                logger.debug(f"{result=}")
+                inference()
+            except Exception as e:
+                logger.error(f"Inference error: {e}")
+
+        inf_thread = threading.Thread(target=run_inference, daemon=True)
+        inf_thread.start()
+
+        # Stream results
+        last_ts: float = 0.0
+        while inf_thread.is_alive():
+            await asyncio.sleep(0.5)
+
+            try:
+                annotation = accumulator.get_prediction()
+                speakers = []
+                segments = []
+
+                for turn, speaker, _ in annotation.itertracks(yield_label=True):
+                    speakers.append(speaker)
+                    segments.append(
+                        {
+                            "speaker": speaker,
+                            "start": float(turn.start),
+                            "end": float(turn.end),
+                        }
+                    )
+
+                # Calculate timestamp
+                current_ts = float(max((s["end"] for s in segments), default=last_ts))
+
+                # Send update
+                result = {
+                    "timestamp": current_ts,
+                    "speakers": list(set(speakers)),
+                    "segments": segments,
+                    "active_segments": segments[-5:] if segments else [],
+                    "confidence": min(len(segments) / 10.0, 1.0),
+                    "is_final": False,
+                }
                 await websocket.send_json(result)
-            except RuntimeError:
-                connection_closed = True
-                break
+                last_ts = current_ts
+
+            except Exception as e:
+                logger.error(f"Get prediction error: {e}")
+
+        # Wait for completion
+        inf_thread.join(timeout=5.0)
+
+        # Send final
+        try:
+            final = accumulator.get_prediction()
+            final.patch()
+
+            segments = []
+            for turn, speaker, _ in final.itertracks(yield_label=True):
+                segments.append(
+                    {
+                        "speaker": speaker,
+                        "start": float(turn.start),
+                        "end": float(turn.end),
+                    }
+                )
+
+            await websocket.send_json(
+                {
+                    "timestamp": max(s["end"] for s in segments) if segments else 0.0,
+                    "speakers": list(set(s["speaker"] for s in segments)),
+                    "segments": segments,
+                    "active_segments": segments,
+                    "confidence": min(len(segments) / 10.0, 1.0),
+                    "is_final": True,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Final error: {e}")
+            await websocket.send_json({"error": str(e), "is_final": True})
+
+        source.close()
 
     except Exception as e:
-        if not connection_closed:
-            logger.error(f"Diarization WebSocket error: {e}")
-            try:
-                await websocket.send_json(
-                    {"type": "error", "message": str(e), "is_final": True}
-                )
-            except RuntimeError:
-                logger.error("Could not send error message: connection closed")
-
+        logger.error(f"WS error: {e}")
+        try:
+            await websocket.send_json({"error": str(e), "is_final": True})
+        except RuntimeError:
+            pass
     finally:
-        if not connection_closed:
-            try:
-                await websocket.close()
-            except RuntimeError:
-                pass
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
