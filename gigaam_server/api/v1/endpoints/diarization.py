@@ -1,33 +1,22 @@
 """Diarization-only streaming endpoint using DIART's StreamingInference."""
 
 import asyncio
-import json
 import threading
-import time
 from typing import AsyncGenerator
 
 import numpy as np
 import rx
+from diart import SpeakerDiarization, SpeakerDiarizationConfig
+from diart.inference import StreamingInference
+from diart.sinks import PredictionAccumulator
+from diart.sources import AudioSource
 from fastapi import APIRouter, WebSocket
 from loguru import logger
 from rx import operators as ops
 
 from gigaam_server.api.v1.endpoints.streaming import audio_stream_generator
-from gigaam_server.main import get_app
 
 router = APIRouter(prefix="/v1/diarization", tags=["diarization"])
-
-# Import DIART
-try:
-    from diart import SpeakerDiarization, SpeakerDiarizationConfig
-    from diart.inference import StreamingInference
-    from diart.sinks import PredictionAccumulator
-    from diart.sources import AudioSource
-
-    DIART_AVAILABLE = True
-except ImportError:
-    DIART_AVAILABLE = False
-    logger.warning("DIART not installed")
 
 
 class StreamingAudioSource(AudioSource):
@@ -122,11 +111,6 @@ async def websocket_diarization(websocket: WebSocket):
     logger.debug(f"Diarization WS connection from {websocket.client}")
     await websocket.accept()
     logger.info("Diarization WS accepted")
-
-    if not DIART_AVAILABLE:
-        await websocket.send_json({"error": "DIART not installed", "is_final": True})
-        await websocket.close()
-        return
 
     # Get parameters
     latency = float(websocket.query_params.get("latency", 0.5))
