@@ -38,6 +38,7 @@ dependencies = [
     "loguru",
     "huggingface_hub",
     "pyannote-audio",
+    "pyaudio>=0.2.14",
 ]
 
 [project.optional-dependencies]
