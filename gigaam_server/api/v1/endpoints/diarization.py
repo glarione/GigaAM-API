@@ -1,7 +1,9 @@
 """Diarization-only streaming endpoint using DIART's StreamingInference."""
 
 import asyncio
+import json
 import threading
+import time
 from typing import AsyncGenerator
 
 import numpy as np
@@ -94,8 +96,18 @@ class StreamingAudioSource(AudioSource):
             loop.close()
 
     def read(self):
-        """Blocking wait (called by StreamingInference)."""
-        pass
+        """Blocking wait for stream to complete (called by StreamingInference)."""
+        # This is called by StreamingInference and should block until stream ends
+        # The actual feeding happens in start_feeding, we just wait for it
+        pass  # Feed thread manages its own lifecycle
+
+    def wait_for_completion(self):
+        """Wait for audio feeding to complete."""
+        # Wait for the feed loop to finish
+        import time
+
+        while self._is_running:
+            time.sleep(0.1)
 
     def close(self):
         if not self._stream.is_stopped:
@@ -159,9 +171,8 @@ async def websocket_diarization(websocket: WebSocket):
         # Run inference in background
         def run_inference():
             try:
-                # Important: call source.read() to start streaming
-                # This blocks until the source is closed
-                source.read()
+                # Start the inference stream (this will call source.read() internally)
+                # But we need to ensure the feed thread is running first
                 inference()
             except Exception as e:
                 logger.error(f"Inference error: {e}")
@@ -171,6 +182,13 @@ async def websocket_diarization(websocket: WebSocket):
 
         inf_thread = threading.Thread(target=run_inference, daemon=True)
         inf_thread.start()
+
+        # Wait for feed thread to complete (it feeds audio to the stream)
+        # The inference will process until the stream is closed
+        feed_thread.join(timeout=60.0)  # Wait up to 60s for audio to finish
+
+        # Give inference a moment to process remaining audio
+        time.sleep(1.0)
 
         # Stream results
         last_ts: float = 0.0
