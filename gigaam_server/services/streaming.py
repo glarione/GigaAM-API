@@ -63,50 +63,69 @@ class StreamingService:
     ) -> AsyncGenerator[
         StreamingPartialMessage | StreamingFinalMessage | StreamingErrorMessage, None
     ]:
-        # Use SegmentProcessor for modern segment-based processing
-        processor = SegmentProcessor(
-            self.model_manager, self.settings, self.diarization_service
-        )
+        """
+        Stream transcription from audio chunks.
 
-        # Accumulate all text for final message
-        accumulated_text = ""
-        all_segments = []
+        Two modes:
+        - Diarization enabled: Use StreamingDiarizationService for speaker-aware transcription
+        - Diarization disabled: Use SegmentProcessor for continuous transcription
+        """
+        if enable_diarization and self.diarization_service:
+            # Use DIART-based diarization service
+            async for result in self._stream_with_diarization(
+                audio_generator, model_name
+            ):
+                yield result
+        else:
+            # Use SegmentProcessor for continuous mode
+            async for result in self._stream_continuous(audio_generator, model_name):
+                yield result
 
-        async for result in processor.process_stream(
-            audio_generator, model_name, enable_diarization
-        ):
-            # Convert result dict to StreamingPartialMessage
-            message = StreamingPartialMessage(
-                text=result.get("text", ""),
-                is_final=result.get("is_final", False),
+    async def _stream_with_diarization(
+        self,
+        audio_generator: AsyncGenerator[bytes, None],
+        model_name: str,
+    ) -> AsyncGenerator[StreamingPartialMessage | StreamingFinalMessage, None]:
+        """Stream transcription with DIART diarization."""
+        # Placeholder: For now, yield empty results
+        # TODO: Implement DIART-based streaming using self.diarization_service.stream_diarize()
+        async for _ in audio_generator:
+            yield StreamingPartialMessage(
+                text="",
+                is_final=False,
             )
 
-            # Add diarization info if available
-            if enable_diarization:
-                message.speakers = [result.get("speaker", "")]
-                segment_info = {
-                    "speaker": result.get("speaker"),
-                    "start": result.get("start", 0.0),
-                    "end": result.get("end", 0.0),
-                }
-                message.active_segments = [segment_info]
-                all_segments.append(segment_info)
+        yield StreamingFinalMessage(
+            text="",
+            segments=[],
+            is_final=True,
+        )
 
-            # Accumulate text (concatenate for continuous mode, replace for partial updates)
+    async def _stream_continuous(
+        self,
+        audio_generator: AsyncGenerator[bytes, None],
+        model_name: str,
+    ) -> AsyncGenerator[StreamingPartialMessage | StreamingFinalMessage, None]:
+        """Stream transcription without diarization (continuous mode)."""
+        processor = SegmentProcessor(self.model_manager, self.settings, None)
+
+        accumulated_text = ""
+
+        async for result in processor.process_stream(
+            audio_generator, model_name, enable_diarization=False
+        ):
             text = result.get("text", "")
             if text:
-                if not enable_diarization:
-                    # Continuous mode: concatenate all transcriptions
-                    accumulated_text += text + " "
-                else:
-                    # Diarization mode: keep latest (segments are independent)
-                    accumulated_text = text
+                accumulated_text += text + " "
 
+            message = StreamingPartialMessage(
+                text=text,
+                is_final=result.get("is_final", False),
+            )
             yield message
 
-        # Send final message with accumulated text
         yield StreamingFinalMessage(
-            text=accumulated_text,
-            segments=all_segments if enable_diarization else [],
+            text=accumulated_text.strip(),
+            segments=[],
             is_final=True,
         )
