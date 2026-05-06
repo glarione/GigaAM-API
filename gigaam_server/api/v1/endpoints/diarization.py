@@ -7,7 +7,6 @@ from typing import AsyncGenerator
 from fastapi import APIRouter, WebSocket
 from loguru import logger
 
-from gigaam_server.main import get_app
 from gigaam_server.api.v1.endpoints.streaming import audio_stream_generator
 
 router = APIRouter(prefix="/v1/diarization", tags=["diarization"])
@@ -27,6 +26,7 @@ async def websocket_diarization(websocket: WebSocket):
       - 1.0s: Good balance
       - 2.0s+: Better accuracy, higher delay
     """
+    from gigaam_server.main import get_app
     logger.debug(f"Diarization WebSocket connection attempt from {websocket.client}")
     await websocket.accept()
     logger.info("Diarization WebSocket connection accepted")
