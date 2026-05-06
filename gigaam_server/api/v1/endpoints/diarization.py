@@ -159,20 +159,37 @@ async def websocket_diarization(websocket: WebSocket):
         # Run inference in background
         def run_inference():
             try:
+                # Important: call source.read() to start streaming
+                # This blocks until the source is closed
+                source.read()
                 inference()
             except Exception as e:
                 logger.error(f"Inference error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
         inf_thread = threading.Thread(target=run_inference, daemon=True)
         inf_thread.start()
 
         # Stream results
         last_ts: float = 0.0
+        update_count = 0
         while inf_thread.is_alive():
             await asyncio.sleep(0.5)
+            update_count += 1
 
             try:
                 annotation = accumulator.get_prediction()
+
+                # Skip if no annotation yet
+                if annotation is None:
+                    if update_count < 5:  # Wait up to 2.5s for first prediction
+                        continue
+                    else:
+                        logger.warning("No predictions received after 2.5s")
+                        break
+
                 speakers = []
                 segments = []
 
@@ -200,9 +217,15 @@ async def websocket_diarization(websocket: WebSocket):
                 }
                 await websocket.send_json(result)
                 last_ts = current_ts
+                logger.debug(
+                    f"Update {update_count}: {len(segments)} segments, {len(speakers)} speakers"
+                )
 
             except Exception as e:
                 logger.error(f"Get prediction error: {e}")
+                import traceback
+
+                traceback.print_exc()
 
         # Wait for completion
         inf_thread.join(timeout=5.0)
