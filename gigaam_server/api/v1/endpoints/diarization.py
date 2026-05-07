@@ -66,6 +66,7 @@ class DiarizationWebSocketSource(AudioSource):
         This runs in a separate thread and converts async audio chunks to
         DIART's synchronous RxPY stream format.
         """
+        logger.info("feed_audio: Starting audio feed thread")
         self._is_running = True
         chunks_sent = 0
         total_bytes = 0
@@ -73,10 +74,18 @@ class DiarizationWebSocketSource(AudioSource):
         async def process_audio():
             nonlocal chunks_sent, total_bytes
             try:
-                logger.info("Starting audio feed processing...")
+                logger.info(
+                    "process_audio: Async loop started, waiting for audio chunks..."
+                )
+                chunk_count = 0
                 async for audio_bytes in audio_generator:
+                    chunk_count += 1
+                    logger.debug(
+                        f"process_audio: Received chunk {chunk_count}: {len(audio_bytes)} bytes"
+                    )
+
                     if len(audio_bytes) == 0:
-                        logger.debug("Received empty audio chunk, skipping")
+                        logger.debug("process_audio: Empty chunk, skipping")
                         continue
 
                     # Decode int16 bytes to float32 waveform
@@ -93,12 +102,12 @@ class DiarizationWebSocketSource(AudioSource):
                         self._audio_buffer = self._audio_buffer[self._chunk_size :]
                         self._stream.on_next(chunk)
                         chunks_sent += 1
-                        logger.debug(
-                            f"Emitted chunk {chunks_sent}: {len(chunk)} samples ({len(chunk) / 16000:.2f}s)"
+                        logger.info(
+                            f"feed_audio: Emitted chunk {chunks_sent}: {len(chunk)} samples ({len(chunk) / 16000:.2f}s)"
                         )
 
                 logger.info(
-                    f"Audio feed completed: {chunks_sent} chunks, {total_bytes} bytes total"
+                    f"feed_audio: Audio generator completed. Total: {chunk_count} chunks received, {chunks_sent} emitted, {total_bytes} bytes"
                 )
 
                 # Emit remaining audio (padded if necessary)
@@ -111,15 +120,17 @@ class DiarizationWebSocketSource(AudioSource):
                     self._stream.on_next(remaining)
                     chunks_sent += 1
                     logger.info(
-                        f"Emitted final chunk {chunks_sent}: {len(remaining)} samples"
+                        f"feed_audio: Emitted final chunk {chunks_sent}: {len(remaining)} samples"
                     )
 
                 # Signal stream completion
-                logger.info(f"Closing audio stream: total {chunks_sent} chunks sent")
+                logger.info(
+                    f"feed_audio: Closing audio stream. Total {chunks_sent} chunks sent"
+                )
                 self._stream.on_completed()
 
             except Exception as e:
-                logger.error(f"Audio feed error: {e}")
+                logger.error(f"feed_audio: Error in process_audio: {e}")
                 import traceback
 
                 traceback.print_exc()
@@ -127,6 +138,26 @@ class DiarizationWebSocketSource(AudioSource):
             finally:
                 self._is_running = False
                 self._feed_complete.set()
+                logger.info("feed_audio: Thread cleanup complete")
+
+        # Run async generator in event loop
+        logger.info("feed_audio: Creating event loop")
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            logger.info("feed_audio: Starting async task")
+            loop.create_task(process_audio())
+            logger.info("feed_audio: Running loop until feed complete")
+            loop.run_until_complete(self._feed_complete.wait())
+            logger.info("feed_audio: Loop completed")
+        except Exception as e:
+            logger.error(f"feed_audio: Event loop error: {e}")
+            import traceback
+
+            traceback.print_exc()
+        finally:
+            logger.info("feed_audio: Closing event loop")
+            loop.close()
 
         # Run async generator in event loop
         loop = asyncio.new_event_loop()
