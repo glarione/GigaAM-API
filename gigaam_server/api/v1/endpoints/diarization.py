@@ -67,11 +67,16 @@ class DiarizationWebSocketSource(AudioSource):
         DIART's synchronous RxPY stream format.
         """
         self._is_running = True
+        chunks_sent = 0
+        total_bytes = 0
 
         async def process_audio():
+            nonlocal chunks_sent, total_bytes
             try:
+                logger.info("Starting audio feed processing...")
                 async for audio_bytes in audio_generator:
                     if len(audio_bytes) == 0:
+                        logger.debug("Received empty audio chunk, skipping")
                         continue
 
                     # Decode int16 bytes to float32 waveform
@@ -80,12 +85,21 @@ class DiarizationWebSocketSource(AudioSource):
                         / 32768.0
                     )
                     self._audio_buffer.append(audio_np)
+                    total_bytes += len(audio_bytes)
 
                     # Emit complete chunks to the stream
                     while len(self._audio_buffer) >= self._chunk_size:
                         chunk = np.concatenate(self._audio_buffer[: self._chunk_size])
                         self._audio_buffer = self._audio_buffer[self._chunk_size :]
                         self._stream.on_next(chunk)
+                        chunks_sent += 1
+                        logger.debug(
+                            f"Emitted chunk {chunks_sent}: {len(chunk)} samples ({len(chunk) / 16000:.2f}s)"
+                        )
+
+                logger.info(
+                    f"Audio feed completed: {chunks_sent} chunks, {total_bytes} bytes total"
+                )
 
                 # Emit remaining audio (padded if necessary)
                 if self._audio_buffer:
@@ -95,12 +109,20 @@ class DiarizationWebSocketSource(AudioSource):
                             remaining, (0, self._chunk_size - len(remaining))
                         )
                     self._stream.on_next(remaining)
+                    chunks_sent += 1
+                    logger.info(
+                        f"Emitted final chunk {chunks_sent}: {len(remaining)} samples"
+                    )
 
                 # Signal stream completion
+                logger.info(f"Closing audio stream: total {chunks_sent} chunks sent")
                 self._stream.on_completed()
 
             except Exception as e:
                 logger.error(f"Audio feed error: {e}")
+                import traceback
+
+                traceback.print_exc()
                 self._stream.on_error(e)
             finally:
                 self._is_running = False
@@ -205,8 +227,11 @@ async def websocket_diarization(websocket: WebSocket):
         def run_inference():
             try:
                 logger.info("Starting DIART inference...")
+                logger.debug(
+                    f"Pipeline config: step={pipeline.config.step}s, latency={pipeline.config.latency}s"
+                )
                 inference()  # This blocks until source.read() completes
-                logger.info("DIART inference completed")
+                logger.info("DIART inference completed successfully")
             except Exception as e:
                 logger.error(f"Inference error: {e}")
                 import traceback
@@ -232,13 +257,23 @@ async def websocket_diarization(websocket: WebSocket):
                 try:
                     annotation = accumulator.get_prediction()
 
+                    logger.debug(
+                        f"Update {update_count}: accumulator prediction = {annotation}"
+                    )
+
                     # Skip if no annotation yet (wait for first prediction)
                     if annotation is None:
                         if update_count < 10:  # Wait up to 5s
+                            logger.debug(
+                                f"Waiting for first prediction... (attempt {update_count}/10)"
+                            )
                             await asyncio.sleep(0.5)
                             continue
                         else:
-                            logger.warning("No predictions received after 5s")
+                            logger.warning(
+                                "No predictions received after 5s. Checking accumulator state..."
+                            )
+                            logger.warning(f"Accumulator URI: {accumulator.uri}")
                             break
 
                     # Extract speaker segments
@@ -297,6 +332,7 @@ async def websocket_diarization(websocket: WebSocket):
         # Send final result
         try:
             final_annotation = accumulator.get_prediction()
+            logger.info(f"Final prediction from accumulator: {final_annotation}")
 
             if final_annotation is not None:
                 # Patch to merge nearby same-speaker turns
@@ -313,6 +349,8 @@ async def websocket_diarization(websocket: WebSocket):
                         }
                     )
 
+                logger.info(f"Final result: {len(segments)} segments extracted")
+
                 final_result = {
                     "timestamp": float(max((s["end"] for s in segments), default=0.0)),
                     "speakers": list(set(s["speaker"] for s in segments)),
@@ -324,10 +362,17 @@ async def websocket_diarization(websocket: WebSocket):
 
                 await websocket.send_json(final_result)
                 logger.info(
-                    f"Final result: {len(segments)} segments, {len(set(s['speaker'] for s in segments))} speakers"
+                    f"Sent final result: {len(segments)} segments, {len(set(s['speaker'] for s in segments))} speakers"
                 )
             else:
-                logger.warning("No final prediction available")
+                logger.warning("No final prediction available from accumulator")
+                logger.warning(
+                    "Accumulator state: uri={}, has_predictions={}".format(
+                        accumulator.uri,
+                        hasattr(accumulator, "_prediction")
+                        and accumulator._prediction is not None,
+                    )
+                )
                 await websocket.send_json(
                     {
                         "timestamp": 0.0,
