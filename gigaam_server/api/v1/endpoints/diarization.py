@@ -151,13 +151,25 @@ class DiarizationQueueSource(AudioSource):
         Blocking method called by StreamingInference.
 
         This method should block until all audio has been read.
-        In our async implementation, we just return immediately
-        since the stream processing happens via the feed_task.
+        We use an asyncio.Event to signal when the stream is complete.
         """
-        # The actual reading happens in start_feeding() which runs in the event loop
-        # This method is called by StreamingInference but doesn't need to do anything
-        # because our stream is driven by the queue, not by read()
-        pass
+        # Create an event to wait for stream completion
+        # This needs to run in the event loop context
+        import threading
+
+        # We need to wait for the stream to complete from this blocking call
+        # The stream completion is signaled by start_feeding() calling on_completed()
+        # We'll use a simple busy-wait with sleep since we're in a different thread context
+
+        # Actually, the issue is that read() is called from StreamingInference in the main thread
+        # but the stream processing happens in the event loop
+        # We need to block until the stream completes
+
+        # Simple solution: busy wait until stream is stopped
+        while not self._stream.is_stopped:
+            time.sleep(0.1)
+
+        logger.info("read(): Stream completed, returning")
 
     def close(self):
         """Close the audio source."""
