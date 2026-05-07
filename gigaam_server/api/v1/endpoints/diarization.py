@@ -1,8 +1,8 @@
 """Diarization-only streaming endpoint using DIART's StreamingInference."""
-
 import asyncio
 import base64
 import json
+import time
 
 import numpy as np
 import rx
