@@ -229,15 +229,17 @@ async def websocket_diarization(websocket: WebSocket):
                     audio_bytes = base64.b64decode(data["data"])
 
                     logger.debug(
-                        f"WebSocket: Received chunk {chunk_count}: {len(audio_bytes)} bytes"
+                        f"WebSocket: Received chunk {chunk_count}: {len(audio_bytes)} bytes, is_final={data.get('is_final', False)}"
                     )
 
                     await source.add_chunk(audio_bytes)
 
                     if data.get("is_final"):
                         logger.info(
-                            f"WebSocket: Received end-of-stream. Total chunks: {chunk_count}"
+                            f"WebSocket: Received is_final signal. Total chunks: {chunk_count}. Stopping source..."
                         )
+                        await source.stop()
+                        logger.info("WebSocket: Source stopped, breaking from loop")
                         break
                 elif msg_type == "close":
                     break
@@ -250,17 +252,23 @@ async def websocket_diarization(websocket: WebSocket):
 
             traceback.print_exc()
         finally:
+            logger.info(
+                "read_audio: Finally block - stopping source if not already stopped"
+            )
             # Stop the source
             await source.stop()
+            logger.info("read_audio: Source stop called")
 
     # Read audio and run inference concurrently
     read_task = asyncio.create_task(read_audio_chunks())
+    logger.info("read_audio_chunks task created")
 
     # Run inference (this will process the stream)
     logger.info("Starting DIART inference...")
     logger.debug(
         f"Pipeline config: step={pipeline.config.step}s, latency={pipeline.config.latency}s"
     )
+    logger.debug(f"Source stream state: {source._stream}")
 
     try:
         # StreamingInference will process the stream until it's completed
@@ -272,11 +280,15 @@ async def websocket_diarization(websocket: WebSocket):
             show_progress=False,
             do_profile=False,
         )
+        logger.info("StreamingInference object created")
+
         inference.attach_observers(accumulator)
+        logger.info("Accumulator attached to inference")
 
         # Run inference (blocks until stream completes)
+        logger.info("Calling inference() - this will block until stream completes...")
         inference()
-        logger.info("DIART inference completed")
+        logger.info("DIART inference() returned successfully")
 
     except Exception as e:
         logger.error(f"Inference error: {e}")
@@ -285,15 +297,19 @@ async def websocket_diarization(websocket: WebSocket):
         traceback.print_exc()
 
     # Wait for read task to complete
+    logger.info("Waiting for read_audio_chunks task to complete...")
     await read_task
+    logger.info("read_audio_chunks task completed")
 
     # Stream results to WebSocket
+    logger.info("Collecting results from accumulator...")
     last_ts: float = 0.0
     update_count = 0
     last_send_time = 0.0
 
     # Give inference time to process
-    await asyncio.sleep(0.5)
+    logger.info("Waiting 1s for inference to finalize...")
+    await asyncio.sleep(1.0)
 
     # Collect and send results
     try:
