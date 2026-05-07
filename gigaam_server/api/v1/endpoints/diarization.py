@@ -15,7 +15,6 @@ try:
     from diart.sinks import PredictionAccumulator
     from diart.sources import AudioSource
 
-
     DIART_AVAILABLE = True
 except ImportError:
     DIART_AVAILABLE = False
@@ -146,6 +145,25 @@ class DiarizationQueueSource(AudioSource):
         """Stop the audio source."""
         self._is_running = False
         await self._chunk_queue.put(None)  # Sentinel to stop the feed loop
+
+    def read(self):
+        """
+        Blocking method called by StreamingInference.
+
+        This method should block until all audio has been read.
+        In our async implementation, we just return immediately
+        since the stream processing happens via the feed_task.
+        """
+        # The actual reading happens in start_feeding() which runs in the event loop
+        # This method is called by StreamingInference but doesn't need to do anything
+        # because our stream is driven by the queue, not by read()
+        pass
+
+    def close(self):
+        """Close the audio source."""
+        # Stop the stream if it's not already stopped
+        if not self._stream.is_stopped:
+            self._stream.on_completed()
 
 
 @router.websocket("/ws")
