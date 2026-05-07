@@ -250,16 +250,17 @@ async def websocket_diarization(websocket: WebSocket):
                 data = message_json
                 audio_bytes = base64.b64decode(data["data"])
 
+                is_final = data.get("is_final", False)
                 logger.debug(
-                    f"WebSocket: Received chunk {chunk_count}: {len(audio_bytes)} bytes"
+                    f"WebSocket: Received chunk {chunk_count}: {len(audio_bytes)} bytes, is_final={is_final}"
                 )
 
                 # Push to source
                 await source.push_from_bytes(audio_bytes)
 
-                if data.get("is_final"):
+                if is_final:
                     logger.info(
-                        f"WebSocket: Received is_final. Total chunks: {chunk_count}"
+                        f"WebSocket: Received is_final. Total chunks: {chunk_count}. Closing source..."
                     )
                     source.close()
                     break
