@@ -138,11 +138,23 @@ class TranscriptionService:
             else:
                 audio_np = audio
 
+            # Minimum segment duration to avoid STFT errors (model requires n_fft < audio_length)
+            # Default n_fft=320 at 16kHz = 20ms, but we need margin for robust processing
+            MIN_SEGMENT_DURATION = 0.1  # 100ms = 1600 samples
+
             for i, seg in enumerate(speaker_segments):
                 # Extract audio for this speaker segment
                 start_sample = int(seg["start"] * SAMPLE_RATE)
                 end_sample = int(seg["end"] * SAMPLE_RATE)
+                segment_duration = (end_sample - start_sample) / SAMPLE_RATE
                 segment_audio = audio_np[start_sample:end_sample]
+
+                # Skip segments too short for transcription (prevents STFT RuntimeError)
+                if segment_duration < MIN_SEGMENT_DURATION:
+                    logger.debug(
+                        f"Skipping segment {i}: duration {segment_duration:.3f}s < {MIN_SEGMENT_DURATION}s"
+                    )
+                    continue
 
                 # Save to temp WAV
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -156,7 +168,17 @@ class TranscriptionService:
                     wav_file.writeframes((segment_audio * 32767).astype(np.int16).tobytes())
 
                 # Transcribe this speaker's segment
-                text = model.transcribe(temp_path)
+                try:
+                    text = model.transcribe(temp_path)
+                except ValueError as e:
+                    if "Audio too short" in str(e):
+                        logger.debug(f"Skipping segment {i}: {e}")
+                        # Remove the temp file since we won't use it
+                        os.unlink(temp_path)
+                        temp_files.remove(temp_path)
+                        continue
+                    # Re-raise if it's a different error
+                    raise
 
                 segment = TranscriptionSegment(
                     id=i,

@@ -119,10 +119,22 @@ class GigaAMASR(GigaAM):
     def transcribe(self, wav_file: str) -> str:
         """
         Transcribes a short audio file into text.
+        
+        Raises:
+            ValueError: If audio is too short for processing (less than ~20ms)
         """
         wav, length = self.prepare_wav(wav_file)
         if length.item() > LONGFORM_THRESHOLD:
             raise ValueError("Too long wav file, use 'transcribe_longform' method.")
+        
+        # Minimum audio length check to prevent STFT RuntimeError
+        # n_fft defaults to 320, so we need at least that many samples
+        MIN_AUDIO_LENGTH = 320
+        if length.item() < MIN_AUDIO_LENGTH:
+            raise ValueError(
+                f"Audio too short: {length.item()} samples < {MIN_AUDIO_LENGTH} minimum. "
+                "This segment will be skipped."
+            )
 
         encoded, encoded_len = self.forward(wav, length)
         return self.decoding.decode(self.head, encoded, encoded_len)[0]
